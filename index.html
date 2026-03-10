@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Commons Vibe Explorer</title>
+    <link rel="stylesheet" href="https://pyscript.net/releases/2026.1.1/core.css">
+    <script type="module" src="https://pyscript.net/releases/2026.1.1/core.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        [py-cloak] { display: none; }
+        .masonry-col { flex: 1 1 0%; min-width: 0; }
+        .minimal-mode .card-text-area {
+            position: absolute; bottom: 0; left: 0; right: 0; top: 0;
+            background: linear-gradient(to top, rgba(0,0,0,0.95) 15%, transparent 100%);
+            opacity: 0; transition: opacity 0.3s ease;
+            display: flex; flex-direction: column; justify-content: flex-end;
+            z-index: 20;
+        }
+        .minimal-mode .group:hover .card-text-area { opacity: 1; }
+        .minimal-mode .card-footer { display: none; }
+        .modal-overlay { background: rgba(0,0,0,0.85); backdrop-filter: blur(4px); }
+        .toggle-transition { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-refresh { animation: spin 0.5s ease-in-out; }
+    </style>
+</head>
+<body class="bg-black text-zinc-200 min-h-screen font-sans">
+
+    <div id="edit-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl">
+            <h2 class="text-lg font-bold text-white mb-2 uppercase tracking-tighter">Edit Category List</h2>
+            <textarea id="modal-textarea" class="w-full h-80 bg-black text-zinc-300 font-mono text-sm p-4 border border-zinc-800 rounded-xl focus:border-blue-500 outline-none mb-6"></textarea>
+            <div class="flex justify-end gap-3">
+                <button id="modal-cancel" class="px-6 py-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors">Cancel</button>
+                <button id="modal-save" class="px-6 py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-blue-500 transition-colors">Apply Changes</button>
+            </div>
+        </div>
+    </div>
+
+    <header class="sticky top-0 z-50 bg-black/95 backdrop-blur-md border-b border-zinc-800 p-4 shadow-2xl">
+        <div class="max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-center gap-4 px-4">
+            <h1 class="text-xl font-bold text-white tracking-tighter uppercase italic">Commons<span class="text-blue-500 font-black">Vibe</span></h1>
+            
+            <div class="flex flex-wrap items-center justify-center gap-4">
+                <div class="relative">
+                    <input id="search-input" type="text" placeholder="Jump to Category..." class="bg-zinc-900 text-[10px] font-bold uppercase tracking-widest text-zinc-300 border border-zinc-800 rounded-lg px-4 py-2 w-48 focus:w-64 focus:border-blue-600 outline-none transition-all placeholder:text-zinc-600">
+                </div>
+
+                <div class="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg pr-3">
+                    <select id="vibe-select" class="bg-transparent text-[10px] font-bold uppercase tracking-widest text-zinc-300 px-3 py-2 outline-none focus:text-blue-500 max-w-[180px]"></select>
+                    <span id="cat-count" class="text-[9px] font-mono text-blue-500 font-black border-l border-zinc-700 pl-3">0</span>
+                </div>
+
+                <div class="flex gap-2">
+                    <button id="refresh-btn" class="p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg group" title="Re-shuffle / Refresh">
+                        <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
+                    <button id="edit-list-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Edit List">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                    </button>
+                </div>
+
+                <div class="flex gap-4 border-l border-zinc-800 pl-4">
+                    <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Alpha</span>
+                        <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner">
+                            <div id="sort-knob" class="absolute top-1 left-1 w-3 h-3 bg-white rounded-full toggle-transition"></div>
+                        </button>
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Shuffle</span>
+                    </div>
+                    <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Min</span>
+                        <button id="view-toggle" class="w-10 h-5 bg-blue-600 rounded-full relative toggle-transition shadow-inner">
+                            <div id="view-knob" class="absolute top-1 left-6 w-3 h-3 bg-white rounded-full toggle-transition"></div>
+                        </button>
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Det</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto p-4 md:p-8">
+        <div id="masonry-container" class="flex flex-row gap-6 items-start">
+            <div id="col-0" class="masonry-col flex flex-col gap-6"></div>
+            <div id="col-1" class="masonry-col hidden sm:flex flex-col gap-6"></div>
+            <div id="col-2" class="masonry-col hidden lg:flex flex-col gap-6"></div>
+            <div id="col-3" class="masonry-col hidden xl:flex flex-col gap-6"></div>
+        </div>
+        <div id="bottom-status" class="py-20 text-center">
+            <div id="loading-spinner" class="animate-spin rounded-full h-6 w-6 border-t-2 border-blue-500 mx-auto"></div>
+            <h2 id="end-message" class="hidden text-sm text-zinc-600 uppercase tracking-widest mt-4 font-bold">End of Collection</h2>
+        </div>
+        <div id="sentinel" class="h-10"></div>
+    </main>
+
+    <script type="py" async>
+        import asyncio
+        import re
+        import urllib.parse
+        import random
+        from pyscript import document, window
+        from pyodide.http import pyfetch
+        from pyodide.ffi import create_proxy
+
+        USER_AGENT = "CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org/; contact: YOUR_WIKIMEDIA_USER)"
+
+        VIBE_CONFIG = """
+Category:Featured_pictures_on_Wikimedia_Commons | ★ Featured Pictures
+Category:Quality_images | Quality Images
+Category:Mid-century_modern_architecture | 🏢 MCM Architecture
+Category:Autochromes | 🎞️ Autochromes
+Category:Pictures_of_the_Year_(2024)
+        """.strip()
+
+        continue_token = None
+        is_loading = False
+        has_reached_end = False
+        sort_mode_shuffle = False 
+        minimal_view = False
+        current_category = ""
+        current_col_idx = 0
+
+        async def fetch_cat_info():
+            headers = {"User-Agent": USER_AGENT}
+            params = {"action": "query", "titles": current_category, "prop": "categoryinfo", "format": "json", "origin": "*"}
+            try:
+                resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
+                data = await resp.json()
+                pages = data.get('query', {}).get('pages', {})
+                count = 0
+                for k, v in pages.items():
+                    count = v.get('categoryinfo', {}).get('files', 0)
+                document.getElementById("cat-count").innerText = f"{count:,}"
+            except: document.getElementById("cat-count").innerText = "0"
+
+        def update_url():
+            params = urllib.parse.urlencode({
+                "cat": current_category,
+                "sort": "shuffle" if sort_mode_shuffle else "alpha",
+                "view": "min" if minimal_view else "det"
+            })
+            window.history.replaceState(None, "", f"?{params}")
+
+        async def rebuild_dropdown():
+            global VIBE_CONFIG, current_category
+            select = document.getElementById("vibe-select")
+            select.innerHTML = ""
+            lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
+            config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
+            url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
+            url_cat = url_params.get('cat', [None])[0]
+            if url_cat and url_cat not in config_cats:
+                VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{url_cat}"
+                lines.append(url_cat)
+                config_cats.append(url_cat)
+            if url_cat and not current_category: current_category = url_cat
+            elif not current_category and lines:
+                current_category = config_cats[0]
+            for line in lines:
+                cat, label = [p.strip() for p in line.split('|')] if '|' in line else (line.strip(), line.strip().replace("Category:", "").replace("_", " "))
+                opt = document.createElement("option")
+                opt.value = cat; opt.text = label; opt.selected = (cat == current_category)
+                select.add(opt)
+
+        async def reset_and_fetch():
+            global continue_token, current_col_idx, has_reached_end, is_loading
+            is_loading = False; current_col_idx = 0; has_reached_end = False
+            continue_token = None
+            document.getElementById("end-message").classList.add("hidden")
+            document.getElementById("loading-spinner").classList.remove("hidden")
+            for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
+            update_url()
+            asyncio.ensure_future(fetch_cat_info())
+            await fetch_images()
+
+        async def fetch_images():
+            global continue_token, is_loading, current_col_idx, has_reached_end
+            if is_loading or has_reached_end: return
+            is_loading = True
+            try:
+                pages_to_render = []
+                headers = {"User-Agent": USER_AGENT}
+                if sort_mode_shuffle:
+                    random_hex = "".join(random.choice("0123456789abcdef") for _ in range(8))
+                    params = {"action": "query", "list": "categorymembers", "cmtitle": current_category, "cmtype": "file", "cmlimit": "12", "cmstarthexsortkey": random_hex, "format": "json", "origin": "*"}
+                    resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
+                    data = await resp.json()
+                    members = data.get('query', {}).get('categorymembers', [])
+                    if not members:
+                        params.pop("cmstarthexsortkey")
+                        resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
+                        data = await resp.json()
+                        members = data.get('query', {}).get('categorymembers', [])
+                    if members:
+                        titles = "|".join([m['title'] for m in members])
+                        info_url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={urllib.parse.quote(titles)}&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=600&format=json&origin=*"
+                        info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
+                        pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
+                    else: has_reached_end = True
+                else:
+                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
+                    if continue_token: params.update(continue_token)
+                    resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
+                    data = await resp.json()
+                    continue_token = data.get('continue')
+                    pages_to_render = list(data.get('query', {}).get('pages', {}).values())
+                    if not pages_to_render: has_reached_end = True
+
+                if pages_to_render:
+                    cols = [1, 2, 3, 4][(window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)]
+                    for page in pages_to_render:
+                        if 'imageinfo' in page:
+                            info = page['imageinfo'][0]
+                            clean_title = page['title'].replace("File:", "")
+                            card = document.createElement("div")
+                            card.className = "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6"
+                            card.innerHTML = f"""<a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block overflow-hidden bg-zinc-800"><img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy"></a>
+                            <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2"><h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate">{clean_title}</h3><p class="text-[11px] text-zinc-400 leading-relaxed font-medium">{clean_title}</p><div class="card-footer pt-3 border-t border-zinc-800/50"><div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</div></div></a>"""
+                            document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
+                            current_col_idx += 1
+                if has_reached_end:
+                    document.getElementById("loading-spinner").classList.add("hidden")
+                    document.getElementById("end-message").classList.remove("hidden")
+            except Exception as e:
+                has_reached_end = True
+                document.getElementById("loading-spinner").classList.add("hidden")
+                document.getElementById("end-message").classList.remove("hidden")
+            is_loading = False
+
+        async def setup():
+            global VIBE_CONFIG, sort_mode_shuffle, minimal_view, current_category
+            url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
+            if url_params.get('sort', [''])[0] == 'shuffle': sort_mode_shuffle = True
+            if url_params.get('view', [''])[0] == 'min': minimal_view = True
+            if sort_mode_shuffle:
+                document.getElementById("sort-knob").style.transform = "translateX(20px)"
+                document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600")
+            if minimal_view:
+                document.getElementById("masonry-container").classList.add("minimal-mode")
+                document.getElementById("view-knob").style.transform = "translateX(-20px)"
+                document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800")
+            await rebuild_dropdown()
+            async def handle_search(e):
+                global current_category
+                if e.key == "Enter":
+                    val = e.target.value.strip()
+                    if not val: return
+                    if not val.lower().startswith("category:"): val = "Category:" + val
+                    current_category = val
+                    e.target.value = ""
+                    await rebuild_dropdown(); await reset_and_fetch()
+            document.getElementById("search-input").addEventListener("keydown", create_proxy(handle_search))
+            document.getElementById("refresh-btn").addEventListener("click", create_proxy(lambda e: [document.getElementById("refresh-icon").classList.add("animate-refresh"), asyncio.ensure_future(reset_and_fetch()), window.setTimeout(create_proxy(lambda: document.getElementById("refresh-icon").classList.remove("animate-refresh")), 500)]))
+            document.getElementById("edit-list-btn").addEventListener("click", create_proxy(lambda e: [setattr(document.getElementById("modal-textarea"), 'value', VIBE_CONFIG.strip()), document.getElementById("edit-modal").classList.remove("hidden")]))
+            document.getElementById("modal-cancel").addEventListener("click", create_proxy(lambda e: document.getElementById("edit-modal").classList.add("hidden")))
+            document.getElementById("modal-save").addEventListener("click", create_proxy(lambda e: [globals().update(VIBE_CONFIG=document.getElementById("modal-textarea").value), rebuild_dropdown(), document.getElementById("edit-modal").classList.add("hidden"), asyncio.ensure_future(reset_and_fetch())]))
+            document.getElementById("vibe-select").addEventListener("change", create_proxy(lambda e: [globals().update(current_category=e.target.value), asyncio.ensure_future(reset_and_fetch())]))
+            document.getElementById("sort-toggle").addEventListener("click", create_proxy(lambda e: [globals().update(sort_mode_shuffle=not sort_mode_shuffle), document.getElementById("sort-knob").style.setProperty("transform", "translateX(20px)" if sort_mode_shuffle else "translateX(0px)"), document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600") if sort_mode_shuffle else document.getElementById("sort-toggle").classList.replace("bg-purple-600", "bg-zinc-700"), asyncio.ensure_future(reset_and_fetch())]))
+            document.getElementById("view-toggle").addEventListener("click", create_proxy(lambda e: [globals().update(minimal_view=not minimal_view), document.getElementById("masonry-container").classList.toggle("minimal-mode"), update_url(), document.getElementById("view-knob").style.setProperty("transform", "translateX(-20px)" if minimal_view else "translateX(0px)"), document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800") if minimal_view else document.getElementById("view-toggle").classList.replace("bg-zinc-800", "bg-blue-600")]))
+            observer = window.IntersectionObserver.new(create_proxy(lambda entries, obs: [asyncio.ensure_future(fetch_images()) for e in entries if e.isIntersecting]), window.Object.new())
+            observer.observe(document.getElementById("sentinel"))
+            await reset_and_fetch()
+        asyncio.ensure_future(setup())
+    </script>
+</body>
+</html>

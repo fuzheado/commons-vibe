@@ -10,6 +10,7 @@
     # pkgs.python311Packages.pip
     # pkgs.nodejs_20
     # pkgs.nodePackages.nodemon
+    pkgs.python3
   ];
   # Sets environment variables in the workspace
   env = {};
@@ -18,11 +19,19 @@
     extensions = [
       # "vscodevim.vim"
       "google.gemini-cli-vscode-ide-companion"
+      "ms-python.python"
     ];
     # Enable previews
     previews = {
       enable = true;
       previews = {
+        # Brought in from Gemini recommend
+        # https://gemini.google.com/app/e31a18457f6f3e29
+        web = {
+          # Use Python's built-in HTTP server to serve the current directory
+          command = [ "python3" "-m" "http.server" "$PORT" "--bind" "0.0.0.0" ];
+          manager = "web";
+        };
         # web = {
         #   # Example: run "npm run dev" with PORT set to IDX's defined port for previews,
         #   # and show it in IDX's web preview panel
