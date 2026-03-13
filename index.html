@@ -125,8 +125,7 @@ Category:Pictures_of_the_Year_(2024)
         minimal_view = False
         current_category = ""
         current_col_idx = 0
-        shuffled_titles = []
-        seen_titles = set() # New: To keep track of all titles seen in shuffle mode
+        seen_titles = set()
 
         async def fetch_cat_info():
             headers = {"User-Agent": USER_AGENT}
@@ -171,11 +170,10 @@ Category:Pictures_of_the_Year_(2024)
                 select.add(opt)
 
         async def reset_and_fetch():
-            global continue_token, current_col_idx, has_reached_end, is_loading, shuffled_titles, seen_titles
+            global continue_token, current_col_idx, has_reached_end, is_loading, seen_titles
             is_loading = False; current_col_idx = 0; has_reached_end = False
             continue_token = None
-            shuffled_titles = [] # Clear shuffled titles on reset
-            seen_titles = set() # Clear seen titles on reset
+            seen_titles = set()
             document.getElementById("end-message").classList.add("hidden")
             document.getElementById("loading-spinner").classList.remove("hidden")
             for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
@@ -184,56 +182,58 @@ Category:Pictures_of_the_Year_(2024)
             await fetch_images()
 
         async def fetch_images():
-            global continue_token, is_loading, current_col_idx, has_reached_end, shuffled_titles, seen_titles
+            global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles
             if is_loading or has_reached_end: return
             is_loading = True
             try:
                 pages_to_render = []
                 headers = {"User-Agent": USER_AGENT}
                 if sort_mode_shuffle:
-                    if not shuffled_titles:
-                        # Fetch a new batch of random titles from a random starting point
-                        random_params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "500", "format": "json", "origin": "*"} # Fetch up to 500 titles
+                    # Clean category name for incategory search
+                    cat_name = current_category.replace("Category:", "").replace("_", " ")
+                    params = {
+                        "action": "query",
+                        "list": "search",
+                        "srsearch": f'incategory:"{cat_name}"',
+                        "srnamespace": 6,
+                        "srlimit": 20, # Fetch more to account for duplicates
+                        "srsort": "random",
+                        "format": "json",
+                        "origin": "*"
+                    }
+                    search_resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
+                    search_data = await search_resp.json()
+                    search_results = search_data.get('query', {}).get('search', [])
 
-                        # Always generate a new random gcmstartsortkey for a fresh random batch
-                        random_hex = "".join(random.choice("0123456789abcdef") for _ in range(8))
-                        random_params["gcmstartsortkey"] = random_hex
+                    if search_results:
+                        # Filter out titles we've already seen in this session
+                        titles_to_fetch = []
+                        for result in search_results:
+                            if result['title'] not in seen_titles:
+                                titles_to_fetch.append(result['title'])
+                                seen_titles.add(result['title'])
+                            if len(titles_to_fetch) >= 12: break
                         
-                        random_resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(random_params)}", headers=headers)
-                        random_data = await random_resp.json()
-                        
-                        random_members = list(random_data.get('query', {}).get('pages', {}).values())
-                        
-                        if random_members:
-                            # Filter out already seen titles before adding to shuffled_titles
-                            for member in random_members:
-                                if member['title'] not in seen_titles:
-                                    shuffled_titles.append(member['title'])
-                                    seen_titles.add(member['title'])
-                            random.shuffle(shuffled_titles) # Shuffle them randomly
+                        if titles_to_fetch:
+                            info_params = {
+                                "action": "query",
+                                "titles": "|".join(titles_to_fetch),
+                                "prop": "imageinfo",
+                                "iiprop": "url|extmetadata",
+                                "iiurlwidth": 600,
+                                "format": "json",
+                                "origin": "*"
+                            }
+                            info_url = f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(info_params)}"
+                            info_resp = await pyfetch(info_url, headers=headers)
+                            info_data = await info_resp.json()
+                            pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
                         else:
-                            has_reached_end = True
-                            is_loading = False
-                            document.getElementById("loading-spinner").classList.add("hidden")
-                            document.getElementById("end-message").classList.remove("hidden")
-                            return
-
-                    # Take a batch from the shuffled titles
-                    titles_to_fetch = []
-                    for _ in range(12): # Fetch 12 at a time
-                        if shuffled_titles:
-                            titles_to_fetch.append(shuffled_titles.pop(0))
-                        else:
-                            break # No more shuffled titles
-
-                    if titles_to_fetch:
-                        titles = "|".join([urllib.parse.quote(t) for t in titles_to_fetch]) # Quote each title
-                        info_url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={titles}&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=600&format=json&origin=*"
-                        info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
-                        pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
+                            # If all 20 were duplicates, just don't render anything this time
+                            # or try again? For now, let's just wait for next scroll.
+                            pass
                     else:
-                        pass 
-
+                        has_reached_end = True
                 else: # Alphabetical sort mode
                     params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
                     if continue_token: params.update(continue_token)
@@ -256,17 +256,12 @@ Category:Pictures_of_the_Year_(2024)
                             document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
                             current_col_idx += 1
                 
-                if sort_mode_shuffle and not shuffled_titles and not pages_to_render and not titles_to_fetch:
-                    has_reached_end = True
-
                 if has_reached_end:
                     document.getElementById("loading-spinner").classList.add("hidden")
                     document.getElementById("end-message").classList.remove("hidden")
             except Exception as e:
-                print(f"Error fetching images: {e}") # Log the error for debugging
-                has_reached_end = True
-                document.getElementById("loading-spinner").classList.add("hidden")
-                document.getElementById("end-message").classList.remove("hidden")
+                print(f"Error fetching images: {e}")
+                # Don't set has_reached_end = True immediately on single error
             is_loading = False
 
         async def setup():
