@@ -14,7 +14,7 @@ A stateless, high-performance visual discovery tool for Wikimedia Commons catego
 
 ### A. Discovery Engine (Alphabetical vs. Random)
 - **Alphabetical Mode:** Uses standard `categorymembers` generator. Correctly terminates and displays an "End of Collection" message when no `continue` token is returned by the API.
-- **Shuffle Mode:** Currently uses `list=search` with `incategory:"Category Name"` and `srsort=random` (CirrusSearch). 
+- **Shuffle Mode:** Currently uses `list=search` with `incategory:"Category Name"` and `srsort=random` (CirrusSearch). Randomizes the order of the retrieved batch before rendering to ensure high-quality visual variety.
 
 ### B. State & URL Syncing
 - **Bookmarkable:** All application state (Category, Sort Mode, View Mode) must be reflected in the URL parameters.
@@ -25,7 +25,7 @@ A stateless, high-performance visual discovery tool for Wikimedia Commons catego
 - **Masonry:** A responsive 4-column grid using `flex-col` containers.
 - **View Modes:**
     - **Detailed:** Shows the filename (without `File:` prefix) and a cleaned, truncated description (3 lines max).
-    - **Minimal:** Edge-to-edge images with a hover-activated gradient overlay for the filename.
+    - **Minimal:** Edge-to-edge images with a hover-activated gradient overlay for the filename and description.
 - **Category Info:** Asynchronous `prop=categoryinfo` query to display the total file count next to the category selector.
 
 ## 4. Functional Requirements
@@ -37,7 +37,16 @@ A stateless, high-performance visual discovery tool for Wikimedia Commons catego
     - Casing is automatically normalized to the official API version upon successful validation.
 - **Manual Entry:** A text input in the header that adds the category to the session's list and triggers a `reset_and_fetch()` cycle.
 
-### B. Interaction & Feedback
+### B. Deep Visual Discovery (Category Navigation)
+- **Category Fetching:** Each file tile retrieves its full category list (up to 500) including "hidden" status via the API.
+- **Tag Icon:** A persistent icon (Detailed mode) or hover-activated icon (Minimal mode) located in the lower-right corner.
+- **Category Drawer:** An absolute-positioned, blurred-glass drawer that slides up to reveal category pills. 
+    - **Normal Categories:** Solid blue pills.
+    - **Hidden Categories:** Outlined/ghost pills.
+- **Dynamic Navigation:** Clicking any category pill in the drawer immediately "jumps" the app to that category and refreshes the masonry grid.
+- **Dismissal:** The drawer must be easily dismissible via a dedicated "Close (X)" button or by clicking the drawer header.
+
+### C. Interaction & Feedback
 - **Re-shuffle Button:** A button with a spin animation (`animate-spin`) that clears the current masonry and triggers a fresh random fetch.
 - **Category Editor:** A modal window for bulk editing the category list. 
     - **UI:** Must provide a large, readable text area (approx 50% of viewport height).
