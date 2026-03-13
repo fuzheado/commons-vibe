@@ -193,14 +193,14 @@
                                 titles_to_fetch.append(result['title']); seen_titles.add(result['title'])
                             if len(titles_to_fetch) >= 12: break
                         if titles_to_fetch:
-                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "format": "json", "origin": "*" }
+                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories|videoinfo", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "viprop": "url|derivatives", "format": "json", "origin": "*" }
                             info_url = f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(info_params)}"
                             info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
                             random.shuffle(pages_to_render)
                     else: has_reached_end = True
                 else: 
-                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*" }
+                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories|videoinfo", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "viprop": "url|derivatives", "format": "json", "origin": "*" }
                     if continue_token: params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
                     data = await resp.json(); continue_token = data.get('continue')
@@ -213,12 +213,31 @@
                         if 'imageinfo' in page:
                             info = page['imageinfo'][0]; metadata = info.get('extmetadata', {}); clean_title = page['title'].replace("File:", "")
                             file_url = info.get('url', '')
-                            is_video = file_url.lower().endswith(('.webm', '.ogv'))
+                            is_video = file_url.lower().endswith(('.webm', '.ogv', '.ogg'))
                             is_audio = file_url.lower().endswith(('.mp3', '.oga', '.ogg', '.wav', '.flac', '.opus'))
                             
+                            # Improved Derivative Selection: Check for VP9 transcoded WebM versions
+                            if (is_video or is_audio) and 'videoinfo' in page:
+                                derivatives = page['videoinfo'][0].get('derivatives', [])
+                                # Prioritize VP9 transcodes, then 360p/480p WebM, then any WebM
+                                best_webm = None
+                                for d in derivatives:
+                                    if d.get('type') == 'video/webm':
+                                        src = d.get('src', '')
+                                        # Prefer VP9 transcodes if available
+                                        if '.vp9.webm' in src.lower():
+                                            if '360p' in src or '480p' in src:
+                                                best_webm = src; break # Found a high-quality VP9 transcode
+                                            if not best_webm: best_webm = src
+                                        # Fallback to standard 360p/480p WebM
+                                        elif not best_webm and ('360p' in src or '480p' in src):
+                                            best_webm = src
+                                        elif not best_webm:
+                                            best_webm = src
+                                if best_webm: file_url = best_webm
+
                             thumb_url = info.get('thumburl', '')
-                            tw = info.get('thumbwidth', 16)
-                            th = info.get('thumbheight', 9)
+                            tw = info.get('thumbwidth', 16); th = info.get('thumbheight', 9)
                             
                             cat_html = ""
                             if 'categories' in page:
@@ -260,7 +279,7 @@
                                     <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block media-link">
                                         {media_html}
                                     </a>
-                                    {f'<button class="audio-play-indicator absolute top-3 right-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-600 hover:bg-blue-500 rounded-full p-2 shadow-xl border border-blue-400"><svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>' if is_audio else ''}
+                                    {f'<button class="audio-play-indicator absolute top-3 right-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-600 hover:bg-blue-500 rounded-full p-2 shadow-xl border border-blue-400 pointer-events-auto"><svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>' if is_audio else ''}
                                     <div class="category-drawer absolute inset-x-0 bottom-0 z-40 p-4 translate-y-full max-h-[80%] overflow-y-auto">
                                         <div class="flex justify-between items-center mb-3 border-b border-zinc-800 pb-1">
                                             <p class="text-[9px] font-black text-blue-500 uppercase tracking-widest">Categories</p>
@@ -293,10 +312,11 @@
                                 async def handle_enter(e, med=media_el):
                                     try:
                                         med.muted = True
+                                        if med.readyState == 0: med.load()
                                         await med.play()
                                     except Exception as ex: print(f"Play error: {ex}")
                                 
-                                async def handle_leave(e, med=media_el):
+                                def handle_leave(e, med=media_el):
                                     try:
                                         med.pause()
                                         med.currentTime = 0
@@ -310,12 +330,9 @@
                                     async def handle_audio_click(e, med=media_el, btn=audio_btn):
                                         e.preventDefault(); e.stopPropagation()
                                         if med.paused:
-                                            med.muted = False
-                                            await med.play()
-                                            btn.classList.add("bg-green-600")
+                                            med.muted = False; await med.play(); btn.classList.add("bg-green-600")
                                         else:
-                                            med.pause()
-                                            btn.classList.remove("bg-green-600")
+                                            med.pause(); btn.classList.remove("bg-green-600")
                                     audio_btn.addEventListener("click", create_proxy(handle_audio_click))
 
                             tag_btn = card.querySelector(".tag-btn"); drawer = card.querySelector(".category-drawer"); close_btn = card.querySelector(".close-drawer-btn")
