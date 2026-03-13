@@ -64,7 +64,7 @@
     backdrop-filter: blur(16px);
     border-top: 1px solid rgba(63, 63, 70, 0.5);
     z-index: 50;
-    transform: translateY(100%); /* Explicitly hidden by default */
+    transform: translateY(100%);
     pointer-events: none;
 }
 
@@ -103,4 +103,13 @@
 
 [py-cloak] {
     display: none;
+}
+
+/* Video/Audio Specifics */
+.media-placeholder {
+    background-color: #18181b;
+}
+
+.video-container video, .audio-container {
+    pointer-events: none;
 }
