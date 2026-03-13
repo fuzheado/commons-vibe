@@ -108,7 +108,7 @@
         from pyodide.http import pyfetch
         from pyodide.ffi import create_proxy
 
-        USER_AGENT = "CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org/; contact: YOUR_WIKIMEDIA_USER)"
+        USER_AGENT = "CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)"
 
         VIBE_CONFIG = """
 Category:Featured_pictures_on_Wikimedia_Commons | ★ Featured Pictures
@@ -125,6 +125,8 @@ Category:Pictures_of_the_Year_(2024)
         minimal_view = False
         current_category = ""
         current_col_idx = 0
+        shuffled_titles = []
+        seen_titles = set() # New: To keep track of all titles seen in shuffle mode
 
         async def fetch_cat_info():
             headers = {"User-Agent": USER_AGENT}
@@ -169,9 +171,11 @@ Category:Pictures_of_the_Year_(2024)
                 select.add(opt)
 
         async def reset_and_fetch():
-            global continue_token, current_col_idx, has_reached_end, is_loading
+            global continue_token, current_col_idx, has_reached_end, is_loading, shuffled_titles, seen_titles
             is_loading = False; current_col_idx = 0; has_reached_end = False
             continue_token = None
+            shuffled_titles = [] # Clear shuffled titles on reset
+            seen_titles = set() # Clear seen titles on reset
             document.getElementById("end-message").classList.add("hidden")
             document.getElementById("loading-spinner").classList.remove("hidden")
             for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
@@ -180,30 +184,57 @@ Category:Pictures_of_the_Year_(2024)
             await fetch_images()
 
         async def fetch_images():
-            global continue_token, is_loading, current_col_idx, has_reached_end
+            global continue_token, is_loading, current_col_idx, has_reached_end, shuffled_titles, seen_titles
             if is_loading or has_reached_end: return
             is_loading = True
             try:
                 pages_to_render = []
                 headers = {"User-Agent": USER_AGENT}
                 if sort_mode_shuffle:
-                    random_hex = "".join(random.choice("0123456789abcdef") for _ in range(8))
-                    params = {"action": "query", "list": "categorymembers", "cmtitle": current_category, "cmtype": "file", "cmlimit": "12", "cmstarthexsortkey": random_hex, "format": "json", "origin": "*"}
-                    resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                    data = await resp.json()
-                    members = data.get('query', {}).get('categorymembers', [])
-                    if not members:
-                        params.pop("cmstarthexsortkey")
-                        resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                        data = await resp.json()
-                        members = data.get('query', {}).get('categorymembers', [])
-                    if members:
-                        titles = "|".join([m['title'] for m in members])
-                        info_url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={urllib.parse.quote(titles)}&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=600&format=json&origin=*"
+                    if not shuffled_titles:
+                        # Fetch a new batch of random titles from a random starting point
+                        random_params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "500", "format": "json", "origin": "*"} # Fetch up to 500 titles
+
+                        # Always generate a new random gcmstartsortkey for a fresh random batch
+                        random_hex = "".join(random.choice("0123456789abcdef") for _ in range(8))
+                        random_params["gcmstartsortkey"] = random_hex
+                        
+                        random_resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(random_params)}", headers=headers)
+                        random_data = await random_resp.json()
+                        
+                        random_members = list(random_data.get('query', {}).get('pages', {}).values())
+                        
+                        if random_members:
+                            # Filter out already seen titles before adding to shuffled_titles
+                            for member in random_members:
+                                if member['title'] not in seen_titles:
+                                    shuffled_titles.append(member['title'])
+                                    seen_titles.add(member['title'])
+                            random.shuffle(shuffled_titles) # Shuffle them randomly
+                        else:
+                            has_reached_end = True
+                            is_loading = False
+                            document.getElementById("loading-spinner").classList.add("hidden")
+                            document.getElementById("end-message").classList.remove("hidden")
+                            return
+
+                    # Take a batch from the shuffled titles
+                    titles_to_fetch = []
+                    for _ in range(12): # Fetch 12 at a time
+                        if shuffled_titles:
+                            titles_to_fetch.append(shuffled_titles.pop(0))
+                        else:
+                            break # No more shuffled titles
+
+                    if titles_to_fetch:
+                        titles = "|".join([urllib.parse.quote(t) for t in titles_to_fetch]) # Quote each title
+                        info_url = f"https://commons.wikimedia.org/w/api.php?action=query&titles={titles}&prop=imageinfo&iiprop=url|extmetadata&iiurlwidth=600&format=json&origin=*"
                         info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
                         pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
-                    else: has_reached_end = True
-                else:
+                    else:
+                        pass 
+
+                else: # Alphabetical sort mode
                     params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
                     if continue_token: params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
@@ -221,13 +252,18 @@ Category:Pictures_of_the_Year_(2024)
                             card = document.createElement("div")
                             card.className = "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6"
                             card.innerHTML = f"""<a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block overflow-hidden bg-zinc-800"><img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy"></a>
-                            <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2"><h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate">{clean_title}</h3><p class="text-[11px] text-zinc-400 leading-relaxed font-medium">{clean_title}</p><div class="card-footer pt-3 border-t border-zinc-800/50"><div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</div></div></a>"""
+                            <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2"><h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate">{clean_title}</h3><p class="text-[11px] text-zinc-400 leading-relaxed font-medium">{'description' in info['extmetadata'] and info['extmetadata']['description']['value'] or clean_title}</p><div class="card-footer pt-3 border-t border-zinc-800/50"><div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</div></div></a>"""
                             document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
                             current_col_idx += 1
+                
+                if sort_mode_shuffle and not shuffled_titles and not pages_to_render and not titles_to_fetch:
+                    has_reached_end = True
+
                 if has_reached_end:
                     document.getElementById("loading-spinner").classList.add("hidden")
                     document.getElementById("end-message").classList.remove("hidden")
             except Exception as e:
+                print(f"Error fetching images: {e}") # Log the error for debugging
                 has_reached_end = True
                 document.getElementById("loading-spinner").classList.add("hidden")
                 document.getElementById("end-message").classList.remove("hidden")
