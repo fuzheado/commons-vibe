@@ -34,7 +34,9 @@
 
     <header class="sticky top-0 z-50 bg-black/95 backdrop-blur-md border-b border-zinc-800 p-4 shadow-2xl">
         <div class="max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-center gap-4 px-4">
-            <h1 class="text-xl font-bold text-white tracking-tighter uppercase italic">Commons<span class="text-blue-500 font-black">Vibe</span></h1>
+            <h1 class="text-xl font-bold text-white tracking-tighter uppercase italic">
+                <a href="/" class="hover:opacity-80 transition-opacity">Commons<span class="text-blue-500 font-black">Vibe</span></a>
+            </h1>
             
             <div class="flex flex-wrap items-center justify-center gap-4">
                 <div class="relative">
@@ -42,16 +44,11 @@
                 </div>
 
                 <div class="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg pr-3">
-                    <select id="vibe-select" class="bg-transparent text-[10px] font-bold tracking-widest text-zinc-300 px-3 py-2 outline-none focus:text-blue-500 max-w-[180px]"></select>
+                    <select id="vibe-select" class="bg-transparent text-[10px] font-bold tracking-widest text-zinc-300 px-3 py-2 outline-none focus:text-blue-500 max-w-[320px]"></select>
                     <span id="cat-count" class="text-[9px] font-mono text-blue-500 font-black border-l border-zinc-700 pl-3">0</span>
                 </div>
 
                 <div class="flex gap-2">
-                    <button id="refresh-btn" class="p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg group" title="Re-shuffle / Refresh">
-                        <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                        </svg>
-                    </button>
                     <button id="edit-list-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Edit List">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
@@ -66,6 +63,11 @@
                             <div id="sort-knob" class="absolute top-1 left-1 w-3 h-3 bg-white rounded-full toggle-transition"></div>
                         </button>
                         <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Shuffle</span>
+                        <button id="refresh-btn" class="p-1.5 bg-zinc-800 hover:bg-blue-600 rounded-full text-zinc-400 hover:text-white transition-all shadow-lg group" title="Re-shuffle / Refresh">
+                            <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                            </svg>
+                        </button>
                     </div>
                     <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
                         <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Min</span>
@@ -103,14 +105,10 @@
         from pyodide.ffi import create_proxy
 
         USER_AGENT = "CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)"
+        LS_KEY = "vibe_config"
 
-        VIBE_CONFIG = """
-Category:Featured_pictures_on_Wikimedia_Commons | ★ Featured Pictures
-Category:Quality_images | Quality Images
-Category:Mid-century_modern_architecture | 🏢 MCM Architecture
-Category:Autochromes | 🎞️ Autochromes
-Category:Pictures_of_the_Year_(2024)
-        """.strip()
+        # VIBE_CONFIG is now initialized from localStorage or external file
+        VIBE_CONFIG = ""
 
         # Global State
         continue_token = None
@@ -121,6 +119,25 @@ Category:Pictures_of_the_Year_(2024)
         current_category = ""
         current_col_idx = 0
         seen_titles = set()
+
+        async def load_config():
+            global VIBE_CONFIG
+            saved = window.localStorage.getItem(LS_KEY)
+            if saved:
+                VIBE_CONFIG = saved
+            else:
+                try:
+                    resp = await pyfetch("categories.txt")
+                    if resp.ok:
+                        VIBE_CONFIG = (await resp.string()).strip()
+                        window.localStorage.setItem(LS_KEY, VIBE_CONFIG)
+                except Exception as e:
+                    print(f"Error loading categories.txt: {e}")
+                    VIBE_CONFIG = "Category:Featured_pictures_on_Wikimedia_Commons | Featured"
+
+        def save_config():
+            global VIBE_CONFIG
+            window.localStorage.setItem(LS_KEY, VIBE_CONFIG.strip())
 
         async def fetch_cat_info():
             global current_category
@@ -175,7 +192,7 @@ Category:Pictures_of_the_Year_(2024)
                 headers = {"User-Agent": USER_AGENT}
                 if sort_mode_shuffle:
                     cat_name = current_category.replace("Category:", "").replace("_", " ")
-                    params = {"action": "query", "list": "search", "srsearch": f'incategory:"{cat_name}"', "srnamespace": 6, "srlimit": 24, "srsort": "random", "format": "json", "origin": "*"}
+                    params = {"action": "query", "list": "search", "srsearch": f'incategory:"{cat_name}"', "srnamespace": 6, "srlimit": 24, "srsort": "random", "format": "json", "origin": "*" }
                     search_resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
                     search_data = await search_resp.json(); search_results = search_data.get('query', {}).get('search', [])
                     if search_results:
@@ -185,14 +202,14 @@ Category:Pictures_of_the_Year_(2024)
                                 titles_to_fetch.append(result['title']); seen_titles.add(result['title'])
                             if len(titles_to_fetch) >= 12: break
                         if titles_to_fetch:
-                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "format": "json", "origin": "*"}
+                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "format": "json", "origin": "*" }
                             info_url = f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(info_params)}"
                             info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
                             random.shuffle(pages_to_render)
                     else: has_reached_end = True
                 else: 
-                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
+                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*" }
                     if continue_token: params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
                     data = await resp.json(); continue_token = data.get('continue')
@@ -249,31 +266,22 @@ Category:Pictures_of_the_Year_(2024)
                                         </button>
                                     </div>
                                 </div>"""
-                            
-                            tag_btn = card.querySelector(".tag-btn")
-                            drawer = card.querySelector(".category-drawer")
-                            close_btn = card.querySelector(".close-drawer-btn")
-                            
+                            tag_btn = card.querySelector(".tag-btn"); drawer = card.querySelector(".category-drawer"); close_btn = card.querySelector(".close-drawer-btn")
                             async def toggle_drawer(e, dr=drawer, btn=tag_btn):
-                                e.preventDefault(); e.stopPropagation()
-                                dr.classList.toggle("drawer-open"); btn.classList.toggle("active")
-                            
-                            tag_btn.addEventListener("click", create_proxy(toggle_drawer))
-                            close_btn.addEventListener("click", create_proxy(toggle_drawer))
-
+                                e.preventDefault(); e.stopPropagation(); dr.classList.toggle("drawer-open"); btn.classList.toggle("active")
+                            tag_btn.addEventListener("click", create_proxy(toggle_drawer)); close_btn.addEventListener("click", create_proxy(toggle_drawer))
                             for pill in card.querySelectorAll(".cat-pill"):
                                 async def jump_to_cat(e):
-                                    e.preventDefault(); e.stopPropagation()
-                                    target_cat = e.target.getAttribute("data-cat")
+                                    e.preventDefault(); e.stopPropagation(); target_cat = e.target.getAttribute("data-cat")
                                     global current_category; current_category = target_cat
+                                    global VIBE_CONFIG; lines = [l.strip() for l in VIBE_CONFIG.split('\n') if l.strip()]
+                                    config_cats = [l.split('|')[0].strip() for l in lines]
+                                    if target_cat not in config_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{target_cat}"; save_config()
                                     await rebuild_dropdown(); await reset_and_fetch()
                                 pill.addEventListener("click", create_proxy(jump_to_cat))
-
-                            document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
-                            current_col_idx += 1
+                            document.getElementById(f"col-{current_col_idx % cols}").appendChild(card); current_col_idx += 1
                 if has_reached_end:
-                    document.getElementById("loading-spinner").classList.add("hidden")
-                    document.getElementById("end-message").classList.remove("hidden")
+                    document.getElementById("loading-spinner").classList.add("hidden"); document.getElementById("end-message").classList.remove("hidden")
             except Exception as e: print(f"Error fetching images: {e}")
             is_loading = False
 
@@ -296,7 +304,7 @@ Category:Pictures_of_the_Year_(2024)
                 if exists:
                     current_vibe_lines = [l.strip() for l in VIBE_CONFIG.split('\n') if l.strip()]
                     current_cats = [l.split('|')[0].strip() for l in current_vibe_lines]
-                    if val not in current_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{val}"
+                    if val not in current_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{val}"; save_config()
                     current_category = val; e.target.value = ""
                     await rebuild_dropdown(); await reset_and_fetch()
                 else: window.alert(f"Category not found: {val}")
@@ -317,8 +325,7 @@ Category:Pictures_of_the_Year_(2024)
             document.getElementById("save-btn-text").classList.add("hidden"); document.getElementById("save-btn-loading").classList.remove("hidden")
             document.getElementById("modal-error").classList.add("hidden")
             new_config = document.getElementById("modal-textarea").value.strip()
-            lines = [l.strip() for l in new_config.split('\n') if l.strip()]
-            cats_to_check = []
+            lines = [l.strip() for l in new_config.split('\n') if l.strip()]; cats_to_check = []
             for line in lines:
                 cat = line.split('|')[0].strip() if '|' in line else line.strip()
                 if not cat.lower().startswith("category:"): cat = "Category:" + cat
@@ -341,7 +348,8 @@ Category:Pictures_of_the_Year_(2024)
                     document.getElementById("modal-error").classList.remove("hidden")
                     document.getElementById("error-list").innerText = "Invalid categories: " + ", ".join(invalid_cats)
                 else:
-                    VIBE_CONFIG = "\n".join(normalized_lines); document.getElementById("edit-modal").classList.add("hidden")
+                    VIBE_CONFIG = "\n".join(normalized_lines); save_config()
+                    document.getElementById("edit-modal").classList.add("hidden")
                     await rebuild_dropdown(); await reset_and_fetch()
             except Exception as e: print(f"Validation error: {e}")
             save_btn.disabled = False; document.getElementById("save-btn-text").classList.remove("hidden"); document.getElementById("save-btn-loading").classList.add("hidden")
@@ -364,13 +372,14 @@ Category:Pictures_of_the_Year_(2024)
 
         async def setup():
             global sort_mode_shuffle, minimal_view, current_category, VIBE_CONFIG
+            await load_config()
             url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
             url_cat = url_params.get('cat', [None])[0]
             if url_cat: 
                 current_category = url_cat
                 lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
                 config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
-                if current_category not in config_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{current_category}"
+                if current_category not in config_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{current_category}"; save_config()
             if url_params.get('sort', [''])[0] == 'shuffle': sort_mode_shuffle = True
             if url_params.get('view', [''])[0] == 'min': minimal_view = True
             if sort_mode_shuffle:
