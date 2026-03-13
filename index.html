@@ -118,6 +118,7 @@ Category:Autochromes | 🎞️ Autochromes
 Category:Pictures_of_the_Year_(2024)
         """.strip()
 
+        # Global State
         continue_token = None
         is_loading = False
         has_reached_end = False
@@ -128,6 +129,7 @@ Category:Pictures_of_the_Year_(2024)
         seen_titles = set()
 
         async def fetch_cat_info():
+            global current_category
             headers = {"User-Agent": USER_AGENT}
             params = {"action": "query", "titles": current_category, "prop": "categoryinfo", "format": "json", "origin": "*"}
             try:
@@ -138,9 +140,11 @@ Category:Pictures_of_the_Year_(2024)
                 for k, v in pages.items():
                     count = v.get('categoryinfo', {}).get('files', 0)
                 document.getElementById("cat-count").innerText = f"{count:,}"
-            except: document.getElementById("cat-count").innerText = "0"
+            except: 
+                document.getElementById("cat-count").innerText = "0"
 
         def update_url():
+            global current_category, sort_mode_shuffle, minimal_view
             params = urllib.parse.urlencode({
                 "cat": current_category,
                 "sort": "shuffle" if sort_mode_shuffle else "alpha",
@@ -154,40 +158,54 @@ Category:Pictures_of_the_Year_(2024)
             select.innerHTML = ""
             lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
             config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
+            
             url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
             url_cat = url_params.get('cat', [None])[0]
+            
             if url_cat and url_cat not in config_cats:
                 VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{url_cat}"
                 lines.append(url_cat)
                 config_cats.append(url_cat)
-            if url_cat and not current_category: current_category = url_cat
+            
+            if url_cat and not current_category: 
+                current_category = url_cat
             elif not current_category and lines:
                 current_category = config_cats[0]
+            
             for line in lines:
                 cat, label = [p.strip() for p in line.split('|')] if '|' in line else (line.strip(), line.strip().replace("Category:", "").replace("_", " "))
                 opt = document.createElement("option")
-                opt.value = cat; opt.text = label; opt.selected = (cat == current_category)
+                opt.value = cat
+                opt.text = label
+                opt.selected = (cat == current_category)
                 select.add(opt)
 
         async def reset_and_fetch():
             global continue_token, current_col_idx, has_reached_end, is_loading, seen_titles
-            is_loading = False; current_col_idx = 0; has_reached_end = False
+            is_loading = False
+            current_col_idx = 0
+            has_reached_end = False
             continue_token = None
             seen_titles = set()
+            
             document.getElementById("end-message").classList.add("hidden")
             document.getElementById("loading-spinner").classList.remove("hidden")
-            for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
+            for i in range(4): 
+                document.getElementById(f"col-{i}").innerHTML = ""
+            
             update_url()
-            asyncio.ensure_future(fetch_cat_info())
+            asyncio.create_task(fetch_cat_info())
             await fetch_images()
 
         async def fetch_images():
-            global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles
-            if is_loading or has_reached_end: return
+            global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles, current_category, sort_mode_shuffle
+            if is_loading or has_reached_end: 
+                return
             is_loading = True
             try:
                 pages_to_render = []
                 headers = {"User-Agent": USER_AGENT}
+                
                 if sort_mode_shuffle:
                     # Clean category name for incategory search
                     cat_name = current_category.replace("Category:", "").replace("_", " ")
@@ -196,7 +214,7 @@ Category:Pictures_of_the_Year_(2024)
                         "list": "search",
                         "srsearch": f'incategory:"{cat_name}"',
                         "srnamespace": 6,
-                        "srlimit": 20, # Fetch more to account for duplicates
+                        "srlimit": 24, # Fetch more to account for duplicates
                         "srsort": "random",
                         "format": "json",
                         "origin": "*"
@@ -206,13 +224,13 @@ Category:Pictures_of_the_Year_(2024)
                     search_results = search_data.get('query', {}).get('search', [])
 
                     if search_results:
-                        # Filter out titles we've already seen in this session
                         titles_to_fetch = []
                         for result in search_results:
                             if result['title'] not in seen_titles:
                                 titles_to_fetch.append(result['title'])
                                 seen_titles.add(result['title'])
-                            if len(titles_to_fetch) >= 12: break
+                            if len(titles_to_fetch) >= 12: 
+                                break
                         
                         if titles_to_fetch:
                             info_params = {
@@ -228,22 +246,33 @@ Category:Pictures_of_the_Year_(2024)
                             info_resp = await pyfetch(info_url, headers=headers)
                             info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
-                        else:
-                            # If all 20 were duplicates, just don't render anything this time
-                            # or try again? For now, let's just wait for next scroll.
-                            pass
                     else:
                         has_reached_end = True
-                else: # Alphabetical sort mode
-                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
-                    if continue_token: params.update(continue_token)
+                else: 
+                    # Alphabetical sort mode
+                    params = {
+                        "action": "query", 
+                        "generator": "categorymembers", 
+                        "gcmtitle": current_category, 
+                        "gcmtype": "file", 
+                        "gcmlimit": "12", 
+                        "prop": "imageinfo", 
+                        "iiprop": "url|extmetadata", 
+                        "iiurlwidth": "600", 
+                        "format": "json", 
+                        "origin": "*"
+                    }
+                    if continue_token: 
+                        params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
                     data = await resp.json()
                     continue_token = data.get('continue')
                     pages_to_render = list(data.get('query', {}).get('pages', {}).values())
-                    if not pages_to_render: has_reached_end = True
+                    if not pages_to_render: 
+                        has_reached_end = True
 
                 if pages_to_render:
+                    # Sort to keep some stability within the batch if needed, or just append
                     cols = [1, 2, 3, 4][(window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)]
                     for page in pages_to_render:
                         if 'imageinfo' in page:
@@ -251,8 +280,21 @@ Category:Pictures_of_the_Year_(2024)
                             clean_title = page['title'].replace("File:", "")
                             card = document.createElement("div")
                             card.className = "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6"
-                            card.innerHTML = f"""<a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block overflow-hidden bg-zinc-800"><img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy"></a>
-                            <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2"><h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate">{clean_title}</h3><p class="text-[11px] text-zinc-400 leading-relaxed font-medium">{'description' in info['extmetadata'] and info['extmetadata']['description']['value'] or clean_title}</p><div class="card-footer pt-3 border-t border-zinc-800/50"><div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</div></div></a>"""
+                            card.innerHTML = f"""
+                                <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block overflow-hidden bg-zinc-800">
+                                    <img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy">
+                                </a>
+                                <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2">
+                                    <h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate">{clean_title}</h3>
+                                    <p class="text-[11px] text-zinc-400 leading-relaxed font-medium">
+                                        {'description' in info['extmetadata'] and info['extmetadata']['description']['value'] or clean_title}
+                                    </p>
+                                    <div class="card-footer pt-3 border-t border-zinc-800/50">
+                                        <div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">
+                                            View Source ↗
+                                        </div>
+                                    </div>
+                                </a>"""
                             document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
                             current_col_idx += 1
                 
@@ -261,43 +303,125 @@ Category:Pictures_of_the_Year_(2024)
                     document.getElementById("end-message").classList.remove("hidden")
             except Exception as e:
                 print(f"Error fetching images: {e}")
-                # Don't set has_reached_end = True immediately on single error
             is_loading = False
 
+        # Event Handlers
+        async def handle_search(e):
+            global current_category
+            if e.key == "Enter":
+                val = e.target.value.strip()
+                if not val: return
+                if not val.lower().startswith("category:"): 
+                    val = "Category:" + val
+                current_category = val
+                e.target.value = ""
+                await rebuild_dropdown()
+                await reset_and_fetch()
+
+        async def handle_refresh(e):
+            document.getElementById("refresh-icon").classList.add("animate-refresh")
+            await reset_and_fetch()
+            await asyncio.sleep(0.5)
+            document.getElementById("refresh-icon").classList.remove("animate-refresh")
+
+        def handle_edit_list(e):
+            global VIBE_CONFIG
+            document.getElementById("modal-textarea").value = VIBE_CONFIG.strip()
+            document.getElementById("edit-modal").classList.remove("hidden")
+
+        def handle_modal_cancel(e):
+            document.getElementById("edit-modal").classList.add("hidden")
+
+        async def handle_modal_save(e):
+            global VIBE_CONFIG
+            VIBE_CONFIG = document.getElementById("modal-textarea").value
+            document.getElementById("edit-modal").classList.add("hidden")
+            await rebuild_dropdown()
+            await reset_and_fetch()
+
+        async def handle_select_change(e):
+            global current_category
+            current_category = e.target.value
+            await reset_and_fetch()
+
+        async def handle_sort_toggle(e):
+            global sort_mode_shuffle
+            sort_mode_shuffle = not sort_mode_shuffle
+            
+            knob = document.getElementById("sort-knob")
+            toggle = document.getElementById("sort-toggle")
+            
+            if sort_mode_shuffle:
+                knob.style.transform = "translateX(20px)"
+                toggle.classList.replace("bg-zinc-700", "bg-purple-600")
+            else:
+                knob.style.transform = "translateX(0px)"
+                toggle.classList.replace("bg-purple-600", "bg-zinc-700")
+            
+            await reset_and_fetch()
+
+        def handle_view_toggle(e):
+            global minimal_view
+            minimal_view = not minimal_view
+            
+            document.getElementById("masonry-container").classList.toggle("minimal-mode")
+            knob = document.getElementById("view-knob")
+            toggle = document.getElementById("view-toggle")
+            
+            if minimal_view:
+                knob.style.transform = "translateX(-20px)"
+                toggle.classList.replace("bg-blue-600", "bg-zinc-800")
+            else:
+                knob.style.transform = "translateX(0px)"
+                toggle.classList.replace("bg-zinc-800", "bg-blue-600")
+            
+            update_url()
+
         async def setup():
-            global VIBE_CONFIG, sort_mode_shuffle, minimal_view, current_category
+            global sort_mode_shuffle, minimal_view, current_category
+            
+            # Initial state from URL
             url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
-            if url_params.get('sort', [''])[0] == 'shuffle': sort_mode_shuffle = True
-            if url_params.get('view', [''])[0] == 'min': minimal_view = True
+            if url_params.get('sort', [''])[0] == 'shuffle': 
+                sort_mode_shuffle = True
+            if url_params.get('view', [''])[0] == 'min': 
+                minimal_view = True
+            
+            # Sync UI with initial state
             if sort_mode_shuffle:
                 document.getElementById("sort-knob").style.transform = "translateX(20px)"
                 document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600")
+            
             if minimal_view:
                 document.getElementById("masonry-container").classList.add("minimal-mode")
                 document.getElementById("view-knob").style.transform = "translateX(-20px)"
                 document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800")
+            
             await rebuild_dropdown()
-            async def handle_search(e):
-                global current_category
-                if e.key == "Enter":
-                    val = e.target.value.strip()
-                    if not val: return
-                    if not val.lower().startswith("category:"): val = "Category:" + val
-                    current_category = val
-                    e.target.value = ""
-                    await rebuild_dropdown(); await reset_and_fetch()
+            
+            # Attach Event Listeners
             document.getElementById("search-input").addEventListener("keydown", create_proxy(handle_search))
-            document.getElementById("refresh-btn").addEventListener("click", create_proxy(lambda e: [document.getElementById("refresh-icon").classList.add("animate-refresh"), asyncio.ensure_future(reset_and_fetch()), window.setTimeout(create_proxy(lambda: document.getElementById("refresh-icon").classList.remove("animate-refresh")), 500)]))
-            document.getElementById("edit-list-btn").addEventListener("click", create_proxy(lambda e: [setattr(document.getElementById("modal-textarea"), 'value', VIBE_CONFIG.strip()), document.getElementById("edit-modal").classList.remove("hidden")]))
-            document.getElementById("modal-cancel").addEventListener("click", create_proxy(lambda e: document.getElementById("edit-modal").classList.add("hidden")))
-            document.getElementById("modal-save").addEventListener("click", create_proxy(lambda e: [globals().update(VIBE_CONFIG=document.getElementById("modal-textarea").value), rebuild_dropdown(), document.getElementById("edit-modal").classList.add("hidden"), asyncio.ensure_future(reset_and_fetch())]))
-            document.getElementById("vibe-select").addEventListener("change", create_proxy(lambda e: [globals().update(current_category=e.target.value), asyncio.ensure_future(reset_and_fetch())]))
-            document.getElementById("sort-toggle").addEventListener("click", create_proxy(lambda e: [globals().update(sort_mode_shuffle=not sort_mode_shuffle), document.getElementById("sort-knob").style.setProperty("transform", "translateX(20px)" if sort_mode_shuffle else "translateX(0px)"), document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600") if sort_mode_shuffle else document.getElementById("sort-toggle").classList.replace("bg-purple-600", "bg-zinc-700"), asyncio.ensure_future(reset_and_fetch())]))
-            document.getElementById("view-toggle").addEventListener("click", create_proxy(lambda e: [globals().update(minimal_view=not minimal_view), document.getElementById("masonry-container").classList.toggle("minimal-mode"), update_url(), document.getElementById("view-knob").style.setProperty("transform", "translateX(-20px)" if minimal_view else "translateX(0px)"), document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800") if minimal_view else document.getElementById("view-toggle").classList.replace("bg-zinc-800", "bg-blue-600")]))
-            observer = window.IntersectionObserver.new(create_proxy(lambda entries, obs: [asyncio.ensure_future(fetch_images()) for e in entries if e.isIntersecting]), window.Object.new())
+            document.getElementById("refresh-btn").addEventListener("click", create_proxy(handle_refresh))
+            document.getElementById("edit-list-btn").addEventListener("click", create_proxy(handle_edit_list))
+            document.getElementById("modal-cancel").addEventListener("click", create_proxy(handle_modal_cancel))
+            document.getElementById("modal-save").addEventListener("click", create_proxy(handle_modal_save))
+            document.getElementById("vibe-select").addEventListener("change", create_proxy(handle_select_change))
+            document.getElementById("sort-toggle").addEventListener("click", create_proxy(handle_sort_toggle))
+            document.getElementById("view-toggle").addEventListener("click", create_proxy(handle_view_toggle))
+            
+            # Infinite Scroll Observer
+            def on_intersect(entries, observer):
+                for entry in entries:
+                    if entry.isIntersecting:
+                        asyncio.create_task(fetch_images())
+            
+            observer = window.IntersectionObserver.new(create_proxy(on_intersect), window.Object.new())
             observer.observe(document.getElementById("sentinel"))
+            
             await reset_and_fetch()
-        asyncio.ensure_future(setup())
+
+        # Start the app
+        asyncio.create_task(setup())
     </script>
 </body>
 </html>
