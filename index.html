@@ -109,6 +109,7 @@
 
         VIBE_CONFIG = ""
 
+        # Global State
         continue_token = None
         is_loading = False
         has_reached_end = False
@@ -117,6 +118,7 @@
         current_category = ""
         current_col_idx = 0
         seen_titles = set()
+        current_request_id = 0
 
         async def load_config():
             global VIBE_CONFIG
@@ -164,7 +166,8 @@
                 opt = document.createElement("option"); opt.value = cat; opt.text = label; opt.selected = (cat == current_category); select.add(opt)
 
         async def reset_and_fetch():
-            global continue_token, current_col_idx, has_reached_end, is_loading, seen_titles
+            global continue_token, current_col_idx, has_reached_end, is_loading, seen_titles, current_request_id
+            current_request_id += 1
             is_loading = False; current_col_idx = 0; has_reached_end = False; continue_token = None; seen_titles = set()
             document.getElementById("end-message").classList.add("hidden"); document.getElementById("loading-spinner").classList.remove("hidden")
             for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
@@ -175,8 +178,9 @@
             return re.sub(r'<[^>]+>', '', text).strip()
 
         async def fetch_images():
-            global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles, current_category, sort_mode_shuffle
+            global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles, current_category, sort_mode_shuffle, current_request_id
             if is_loading or has_reached_end: return
+            req_id = current_request_id
             is_loading = True
             try:
                 pages_to_render = []
@@ -193,43 +197,47 @@
                                 titles_to_fetch.append(result['title']); seen_titles.add(result['title'])
                             if len(titles_to_fetch) >= 12: break
                         if titles_to_fetch:
-                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories|videoinfo", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "viprop": "url|derivatives", "format": "json", "origin": "*" }
+                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|videoinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata|derivatives", "viprop": "url|derivatives", "iiurlwidth": 600, "format": "json", "origin": "*" }
                             info_url = f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(info_params)}"
                             info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
                             random.shuffle(pages_to_render)
                     else: has_reached_end = True
                 else: 
-                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories|videoinfo", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "viprop": "url|derivatives", "format": "json", "origin": "*" }
+                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|videoinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata|derivatives", "viprop": "url|derivatives", "iiurlwidth": "600", "format": "json", "origin": "*" }
                     if continue_token: params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
                     data = await resp.json(); continue_token = data.get('continue')
                     pages_to_render = list(data.get('query', {}).get('pages', {}).values())
                     if not continue_token: has_reached_end = True
 
+                if req_id != current_request_id: return # Abort if request is stale
+
                 if pages_to_render:
                     cols = [1, 2, 3, 4][(window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)]
                     for page in pages_to_render:
-                        if 'imageinfo' in page:
-                            info = page['imageinfo'][0]; metadata = info.get('extmetadata', {}); clean_title = page['title'].replace("File:", "")
+                        if 'imageinfo' in page or 'videoinfo' in page:
+                            # Consolidate metadata from both properties
+                            info = {}
+                            if 'imageinfo' in page: info.update(page['imageinfo'][0])
+                            if 'videoinfo' in page: info.update(page['videoinfo'][0])
+                            
+                            metadata = info.get('extmetadata', {}); clean_title = page['title'].replace("File:", "")
                             file_url = info.get('url', '')
                             is_video = file_url.lower().endswith(('.webm', '.ogv', '.ogg'))
                             is_audio = file_url.lower().endswith(('.mp3', '.oga', '.ogg', '.wav', '.flac', '.opus'))
                             
-                            # Improved Derivative Selection: Check for VP9 transcoded WebM versions
-                            if (is_video or is_audio) and 'videoinfo' in page:
-                                derivatives = page['videoinfo'][0].get('derivatives', [])
-                                # Prioritize VP9 transcodes, then 360p/480p WebM, then any WebM
+                            # Optimized Derivative Selection
+                            derivatives = info.get('derivatives', [])
+                            if (is_video or is_audio) and derivatives:
                                 best_webm = None
                                 for d in derivatives:
                                     if d.get('type') == 'video/webm':
                                         src = d.get('src', '')
-                                        # Prefer VP9 transcodes if available
                                         if '.vp9.webm' in src.lower():
                                             if '360p' in src or '480p' in src:
-                                                best_webm = src; break # Found a high-quality VP9 transcode
+                                                best_webm = src; break
                                             if not best_webm: best_webm = src
-                                        # Fallback to standard 360p/480p WebM
                                         elif not best_webm and ('360p' in src or '480p' in src):
                                             best_webm = src
                                         elif not best_webm:
@@ -276,9 +284,7 @@
 
                             card.innerHTML = f"""
                                 <div class="relative overflow-hidden media-wrapper">
-                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block media-link">
-                                        {media_html}
-                                    </a>
+                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block media-link">{media_html}</a>
                                     {f'<button class="audio-play-indicator absolute top-3 right-3 z-50 opacity-0 group-hover:opacity-100 transition-opacity bg-blue-600 hover:bg-blue-500 rounded-full p-2 shadow-xl border border-blue-400 pointer-events-auto"><svg class="w-4 h-4 text-white" fill="currentColor" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>' if is_audio else ''}
                                     <div class="category-drawer absolute inset-x-0 bottom-0 z-40 p-4 translate-y-full max-h-[80%] overflow-y-auto">
                                         <div class="flex justify-between items-center mb-3 border-b border-zinc-800 pb-1">
@@ -312,27 +318,20 @@
                                 async def handle_enter(e, med=media_el):
                                     try:
                                         med.muted = True
-                                        if med.readyState == 0: med.load()
+                                        if med.readyState < 1: med.load()
                                         await med.play()
-                                    except Exception as ex: print(f"Play error: {ex}")
-                                
-                                def handle_leave(e, med=media_el):
-                                    try:
-                                        med.pause()
-                                        med.currentTime = 0
                                     except: pass
-                                
-                                card.addEventListener("mouseenter", create_proxy(handle_enter))
-                                card.addEventListener("mouseleave", create_proxy(handle_leave))
-
+                                def handle_leave(e, med=media_el):
+                                    try: med.pause(); med.currentTime = 0
+                                    except: pass
+                                card.addEventListener("mouseenter", create_proxy(handle_enter)); card.addEventListener("mouseleave", create_proxy(handle_leave))
                                 if is_audio:
                                     audio_btn = card.querySelector(".audio-play-indicator")
                                     async def handle_audio_click(e, med=media_el, btn=audio_btn):
                                         e.preventDefault(); e.stopPropagation()
                                         if med.paused:
                                             med.muted = False; await med.play(); btn.classList.add("bg-green-600")
-                                        else:
-                                            med.pause(); btn.classList.remove("bg-green-600")
+                                        else: med.pause(); btn.classList.remove("bg-green-600")
                                     audio_btn.addEventListener("click", create_proxy(handle_audio_click))
 
                             tag_btn = card.querySelector(".tag-btn"); drawer = card.querySelector(".category-drawer"); close_btn = card.querySelector(".close-drawer-btn")
