@@ -1,66 +1,45 @@
-## PRD: Commons Vibe Explorer
-### 1. Project Goal
+# Product Requirements Document (PRD): Commons Vibe Explorer
+
+## 1. Project Goal
 A stateless, high-performance visual discovery tool for Wikimedia Commons categories. It must provide a "Pinterest-style" masonry experience while overcoming the alphabetical bias of the MediaWiki API.
 
-### 2. Core Architecture
-Language: Python 3.x (running via PyScript/Pyodide 2026.1.1).
+## 2. Core Architecture
+- **Language:** Python 3.x (running via [PyScript/Pyodide 2026.1.1](https://pyscript.net/)).
+- **UI Framework:** Tailwind CSS (CDN-loaded).
+- **Deployment Target:** Wikimedia Toolforge (Static hosting via PHP runtime).
+- **Data Source:** [MediaWiki Action API](https://commons.wikimedia.org/w/api.php) (and potentially the REST API).
 
-UI Framework: Tailwind CSS (CDN-loaded).
+## 3. Technical Specifications
 
-Deployment Target: Wikimedia Toolforge (Static hosting via PHP runtime).
+### A. Discovery Engine (Alphabetical vs. Random)
+- **Alphabetical Mode:** Uses standard `categorymembers` generator.
+- **Shuffle Mode:** Currently uses `list=search` with `incategory:"Category Name"` and `srsort=random` (CirrusSearch). 
+- **Optimization:** Investigate more efficient ways to get high-quality random results if `list=search` has limitations (e.g., namespace filtering, limit constraints).
 
-Data Source: MediaWiki Action API (https://commons.wikimedia.org/w/api.php) or other APIs that are useful, such as REST API.
+### B. State & URL Syncing
+- **Bookmarkable:** All application state (Category, Sort Mode, View Mode) must be reflected in the URL parameters.
+- **Parameters:** `cat` (Category), `sort` (`alpha`|`shuffle`), `view` (`min`|`det`).
+- **Dynamic Injections:** If a URL contains a `cat` parameter not in the default list, it must be added to the dropdown and internal category list on load.
 
-### 3. Technical Specifications
-A. Browsing via alphabetical listing or "True Random" Discovery Engine
-The most efficient way to do "random" seems to be to use CirrusSearch function with srsort=random, but other more optimized ways may be considered.
+### C. UI & Masonry Logic
+- **Masonry:** A responsive 4-column grid using `flex-col` containers, allowing for infinite scroll that will keep loading results as the user hits the "bottom" of the content
+- **View Modes:**
+    - **Detailed:** Shows the filename (without `File:` prefix) and the description fetched from Commons, and can be truncated if more than 3 lines long.
+    - **Minimal:** Edge-to-edge images with a hover-activated gradient overlay for the filename.
+- **Category Info:** Asynchronous `prop=categoryinfo` query to display the total file count next to the category selector.
 
-B. State & URL Syncing
-The application must be entirely bookmarkable and "shareable" by having parameters appended to the URL.
+## 4. Functional Requirements
 
-Parameters at a minimum: cat (Category), sort (alpha/shuffle), view (min/det).
+### A. Category Handling
+- **Case Sensitivity:** Categories are case-sensitive. The UI must respect and display the correct casing to avoid user confusion.
+- **Manual Entry:** A text input in the header that adds the category to the session's dropdown and triggers a `reset_and_fetch()` cycle.
 
-Logic: Update the URL every time a toggle is flipped or a category is changed so that the URL can be copied/shared to others.
+### B. Interaction & Feedback
+- **Re-shuffle Button:** A button with a spin animation that clears the current masonry and triggers a fresh random fetch.
+- **Category Editor:** A modal window for bulk editing the category list. 
+    - **Validation:** (Planned) Sanity check to ensure categories exist on Wikimedia Commons before applying changes. An error box should pop up to warn the user about all categories that failed to be verified so they can fix the problem.
 
-Injected Categories: If a URL contains a cat parameter not in the hardcoded list, the app must programmatically append that category to a saved internal list and the dropdown menu on load.
-
-C. UI & Masonry Logic
-Masonry: A 4-column responsive grid using flex-col containers.
-
-View Modes:
-
-Detailed: Shows the filename (with File: prefix stripped) and the description.
-
-Minimal: Images are edge-to-edge. Hovering reveals a gradient overlay with the filename.
-
-Category Info: An asynchronous "look-ahead" query to prop=categoryinfo must display the total file count next to the category selector.
-
-### 4. Functional Requirements
-Case sensitivity: All listings or interfaces elements dealing with categories must display upper and lowercase properly, since categories are case-sensitive. Therefore, no "ALL CAPS" display or handling of categories, or the user may be confused.
-
-Manual entry category Bar: A text input in the header. On Enter, it must:
-
-Add the new category to the session's dropdown list if it doesn't already exist.
-
-Trigger a reset_and_fetch() cycle.
-
-Re-shuffle Button: A dedicated button with a spin animation (animate-spin) that clears the current masonry columns and triggers a fresh random listing.
-
-Category Editor: A modal window where the textarea is pre-filled with the current configuration string that holds a list of categories. Changes to this textarea will be reflected in the dropdown list. The interface should do a quick sanity check to make sure that category actually exists in Wikimedia Commons, and report an error back to the user if it is invalid.
-
-### 5. API Compliance & Security
-User-Agent: Every pyfetch call must include a custom header:
-User-Agent: CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org; contact: User:Fuzheado)
-
-CORS: All queries must include origin=*.
-
-Image Sizing: Thumbnails should be requested at iiurlwidth=600 for high-density displays.
-
-### 6. Deployment "Life Hack" (Toolforge)
-To avoid the complexities of WSGI or Python-vhost configurations on Toolforge:
-
-Name the file index.html.
-
-Place it in public_html.
-
-Start the web service using the PHP runtime: webservice php8.2 start. This forces the server to treat the directory as a static file server.
+## 5. API Compliance & Security
+- **User-Agent:** `CommonsVibeExplorer/1.4 (https://commons-vibe.toolforge.org; contact: User:Fuzheado)`
+- **CORS:** All API queries must include `origin=*`.
+- **Image Sizing:** Thumbnails requested at `iiurlwidth=600` for high-density displays.
