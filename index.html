@@ -16,7 +16,7 @@
             <h2 class="text-lg font-bold text-white mb-2 uppercase tracking-tighter p-6 pb-2">Edit Category List</h2>
             <div class="px-6 flex-1 overflow-hidden flex flex-col">
                 <p class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest">One category per line. Format: <code class="text-blue-400">Category:Name | Label</code></p>
-                <textarea id="modal-textarea" class="w-full flex-1 bg-black text-zinc-300 font-mono text-sm p-4 border border-zinc-800 rounded-xl focus:border-blue-500 outline-none mb-4 resize-none h-[50vh] min-h-[400px]"></textarea>
+                <textarea id="modal-textarea" class="w-full flex-1 bg-black text-zinc-300 font-mono text-sm p-4 border border-zinc-800 rounded-xl focus:border-blue-500 outline-none mb-4 resize-none" rows="20" style="min-height: 450px;"></textarea>
                 <div id="modal-error" class="hidden bg-red-900/20 border border-red-500/50 rounded-lg p-3 mb-4">
                     <p class="text-xs text-red-400 font-bold uppercase tracking-wider mb-1">Validation Failed</p>
                     <p id="error-list" class="text-[10px] text-red-300 leading-tight"></p>
@@ -240,6 +240,8 @@ Category:Pictures_of_the_Year_(2024)
                             info_resp = await pyfetch(info_url, headers=headers)
                             info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
+                            # RANDOMIZE the order within the batch to avoid alphabetical bias from action=query
+                            random.shuffle(pages_to_render)
                     else:
                         has_reached_end = True
                 else: 
@@ -343,10 +345,11 @@ Category:Pictures_of_the_Year_(2024)
                         val = v['title'] # Use the normalized title from API
                 
                 if exists:
-                    # Make it "stick" by adding it to VIBE_CONFIG permanently for this session
-                    lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
-                    config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
-                    if val not in config_cats:
+                    # Explicitly add to VIBE_CONFIG to make it "stick" for the session
+                    current_vibe_lines = [l.strip() for l in VIBE_CONFIG.split('\n') if l.strip()]
+                    current_cats = [l.split('|')[0].strip() for l in current_vibe_lines]
+                    
+                    if val not in current_cats:
                         VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{val}"
                     
                     current_category = val
