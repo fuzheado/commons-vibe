@@ -46,6 +46,7 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **Advanced Layouts:** Easy toggling between "Compact" views for rapid browsing and "Detailed" views for high-resolution appreciation.
+* **Filering:** Filter based on filetype (eg. no TIF files), useful display of video files, 
 
 ---
 

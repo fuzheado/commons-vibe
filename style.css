@@ -1,0 +1,53 @@
+.masonry-col {
+    flex: 1 1 0%;
+    min-width: 0;
+}
+
+.minimal-mode .card-text-area {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    top: 0;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.95) 15%, transparent 100%);
+    opacity: 0;
+    transition: opacity 0.3s ease;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    z-index: 20;
+}
+
+.minimal-mode .group:hover .card-text-area {
+    opacity: 1;
+}
+
+.minimal-mode .card-footer {
+    display: none;
+}
+
+.modal-overlay {
+    background: rgba(0, 0, 0, 0.85);
+    backdrop-filter: blur(4px);
+}
+
+.toggle-transition {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-refresh {
+    animation: spin 0.5s ease-in-out;
+}
+
+[py-cloak] {
+    display: none;
+}
