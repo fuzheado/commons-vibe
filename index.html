@@ -80,7 +80,7 @@
     </header>
 
     <main class="max-w-7xl mx-auto p-4 md:p-8">
-        <div id="masonry-container" class="flex flex-row gap-6 items-start">
+        <div id="masonry-container" class="masonry-container flex flex-row gap-6 items-start">
             <div id="col-0" class="masonry-col flex flex-col gap-6"></div>
             <div id="col-1" class="masonry-col hidden sm:flex flex-col gap-6"></div>
             <div id="col-2" class="masonry-col hidden lg:flex flex-col gap-6"></div>
@@ -134,183 +134,147 @@ Category:Pictures_of_the_Year_(2024)
                 for k, v in pages.items():
                     count = v.get('categoryinfo', {}).get('files', 0)
                 document.getElementById("cat-count").innerText = f"{count:,}"
-            except: 
-                document.getElementById("cat-count").innerText = "0"
+            except: document.getElementById("cat-count").innerText = "0"
 
         def update_url():
             global current_category, sort_mode_shuffle, minimal_view
             params = urllib.parse.urlencode({
-                "cat": current_category,
-                "sort": "shuffle" if sort_mode_shuffle else "alpha",
-                "view": "min" if minimal_view else "det"
+                "cat": current_category, "sort": "shuffle" if sort_mode_shuffle else "alpha", "view": "min" if minimal_view else "det"
             })
             window.history.replaceState(None, "", f"?{params}")
 
         async def rebuild_dropdown():
             global VIBE_CONFIG, current_category
-            select = document.getElementById("vibe-select")
-            select.innerHTML = ""
+            select = document.getElementById("vibe-select"); select.innerHTML = ""
             lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
             config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
-            
-            if not current_category and config_cats:
-                current_category = config_cats[0]
-            
-            # All categories to show in dropdown
+            if not current_category and config_cats: current_category = config_cats[0]
             display_lines = lines[:]
-            if current_category and current_category not in config_cats:
-                display_lines.append(current_category)
-
+            if current_category and current_category not in config_cats: display_lines.append(current_category)
             for line in display_lines:
                 cat, label = [p.strip() for p in line.split('|')] if '|' in line else (line.strip(), line.strip().replace("Category:", "").replace("_", " "))
-                opt = document.createElement("option")
-                opt.value = cat
-                opt.text = label
-                opt.selected = (cat == current_category)
-                select.add(opt)
+                opt = document.createElement("option"); opt.value = cat; opt.text = label; opt.selected = (cat == current_category); select.add(opt)
 
         async def reset_and_fetch():
             global continue_token, current_col_idx, has_reached_end, is_loading, seen_titles
-            is_loading = False
-            current_col_idx = 0
-            has_reached_end = False
-            continue_token = None
-            seen_titles = set()
-            
-            document.getElementById("end-message").classList.add("hidden")
-            document.getElementById("loading-spinner").classList.remove("hidden")
-            for i in range(4): 
-                document.getElementById(f"col-{i}").innerHTML = ""
-            
-            update_url()
-            asyncio.create_task(fetch_cat_info())
-            await fetch_images()
+            is_loading = False; current_col_idx = 0; has_reached_end = False; continue_token = None; seen_titles = set()
+            document.getElementById("end-message").classList.add("hidden"); document.getElementById("loading-spinner").classList.remove("hidden")
+            for i in range(4): document.getElementById(f"col-{i}").innerHTML = ""
+            update_url(); asyncio.create_task(fetch_cat_info()); await fetch_images()
 
         def clean_html(text):
             if not text: return ""
-            # Simple regex to strip HTML tags
             return re.sub(r'<[^>]+>', '', text).strip()
 
         async def fetch_images():
             global continue_token, is_loading, current_col_idx, has_reached_end, seen_titles, current_category, sort_mode_shuffle
-            if is_loading or has_reached_end: 
-                return
+            if is_loading or has_reached_end: return
             is_loading = True
             try:
                 pages_to_render = []
                 headers = {"User-Agent": USER_AGENT}
-                
                 if sort_mode_shuffle:
-                    # Clean category name for incategory search
                     cat_name = current_category.replace("Category:", "").replace("_", " ")
-                    params = {
-                        "action": "query",
-                        "list": "search",
-                        "srsearch": f'incategory:"{cat_name}"',
-                        "srnamespace": 6,
-                        "srlimit": 24, # Fetch more to account for duplicates
-                        "srsort": "random",
-                        "format": "json",
-                        "origin": "*"
-                    }
+                    params = {"action": "query", "list": "search", "srsearch": f'incategory:"{cat_name}"', "srnamespace": 6, "srlimit": 24, "srsort": "random", "format": "json", "origin": "*"}
                     search_resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                    search_data = await search_resp.json()
-                    search_results = search_data.get('query', {}).get('search', [])
-
+                    search_data = await search_resp.json(); search_results = search_data.get('query', {}).get('search', [])
                     if search_results:
                         titles_to_fetch = []
                         for result in search_results:
                             if result['title'] not in seen_titles:
-                                titles_to_fetch.append(result['title'])
-                                seen_titles.add(result['title'])
-                            if len(titles_to_fetch) >= 12: 
-                                break
-                        
+                                titles_to_fetch.append(result['title']); seen_titles.add(result['title'])
+                            if len(titles_to_fetch) >= 12: break
                         if titles_to_fetch:
-                            info_params = {
-                                "action": "query",
-                                "titles": "|".join(titles_to_fetch),
-                                "prop": "imageinfo",
-                                "iiprop": "url|extmetadata",
-                                "iiurlwidth": 600,
-                                "format": "json",
-                                "origin": "*"
-                            }
+                            info_params = {"action": "query", "titles": "|".join(titles_to_fetch), "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": 600, "format": "json", "origin": "*"}
                             info_url = f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(info_params)}"
-                            info_resp = await pyfetch(info_url, headers=headers)
-                            info_data = await info_resp.json()
+                            info_resp = await pyfetch(info_url, headers=headers); info_data = await info_resp.json()
                             pages_to_render = list(info_data.get('query', {}).get('pages', {}).values())
-                            # RANDOMIZE the order within the batch to avoid alphabetical bias from action=query
                             random.shuffle(pages_to_render)
-                    else:
-                        has_reached_end = True
+                    else: has_reached_end = True
                 else: 
-                    # Alphabetical sort mode
-                    params = {
-                        "action": "query", 
-                        "generator": "categorymembers", 
-                        "gcmtitle": current_category, 
-                        "gcmtype": "file", 
-                        "gcmlimit": "12", 
-                        "prop": "imageinfo", 
-                        "iiprop": "url|extmetadata", 
-                        "iiurlwidth": "600", 
-                        "format": "json", 
-                        "origin": "*"
-                    }
-                    if continue_token: 
-                        params.update(continue_token)
+                    params = {"action": "query", "generator": "categorymembers", "gcmtitle": current_category, "gcmtype": "file", "gcmlimit": "12", "prop": "imageinfo|categories", "clprop": "hidden", "cllimit": "max", "iiprop": "url|extmetadata", "iiurlwidth": "600", "format": "json", "origin": "*"}
+                    if continue_token: params.update(continue_token)
                     resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                    data = await resp.json()
-                    continue_token = data.get('continue')
+                    data = await resp.json(); continue_token = data.get('continue')
                     pages_to_render = list(data.get('query', {}).get('pages', {}).values())
-                    
-                    # If no continue token is present in the response, we've reached the end
-                    if not continue_token:
-                        has_reached_end = True
+                    if not continue_token: has_reached_end = True
 
                 if pages_to_render:
                     cols = [1, 2, 3, 4][(window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)]
                     for page in pages_to_render:
                         if 'imageinfo' in page:
-                            info = page['imageinfo'][0]
-                            metadata = info.get('extmetadata', {})
-                            
-                            clean_title = page['title'].replace("File:", "")
-                            
-                            # Improved description logic
-                            # Try ImageDescription, then description, then ObjectName
+                            info = page['imageinfo'][0]; metadata = info.get('extmetadata', {}); clean_title = page['title'].replace("File:", "")
+                            cat_html = ""
+                            if 'categories' in page:
+                                for cat_obj in page['categories']:
+                                    cat_title = cat_obj['title']; display_name = cat_title.replace("Category:", "").replace("_", " "); is_hidden = 'hidden' in cat_obj
+                                    pill_class = "border border-zinc-700 text-zinc-500" if is_hidden else "bg-blue-700 text-white"
+                                    cat_html += f'<button class="cat-pill px-2 py-1 rounded-full text-[8px] font-bold whitespace-nowrap transition-colors hover:bg-blue-500 hover:text-white {pill_class}" data-cat="{cat_title}">{display_name}</button>'
+
                             descr_data = metadata.get('ImageDescription') or metadata.get('description') or metadata.get('ObjectName')
-                            if descr_data:
-                                description = clean_html(descr_data.get('value', ''))
-                            else:
-                                description = clean_title
+                            description = clean_html(descr_data.get('value', '')) if descr_data else clean_title
                                 
                             card = document.createElement("div")
                             card.className = "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6"
                             card.innerHTML = f"""
-                                <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block overflow-hidden bg-zinc-800">
-                                    <img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy">
-                                </a>
-                                <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="card-text-area p-5 no-underline flex flex-col gap-y-2">
-                                    <h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate" title="{clean_title}">{clean_title}</h3>
-                                    <p class="text-[11px] text-zinc-400 leading-relaxed font-medium line-clamp-3">
-                                        {description}
-                                    </p>
-                                    <div class="card-footer pt-3 border-t border-zinc-800/50">
-                                        <div class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">
-                                            View Source ↗
+                                <div class="relative overflow-hidden bg-zinc-800 aspect-auto">
+                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block">
+                                        <img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy">
+                                    </a>
+                                    <div class="category-drawer absolute inset-x-0 bottom-0 z-40 p-4 translate-y-full max-h-[80%] overflow-y-auto">
+                                        <div class="flex justify-between items-center mb-3 border-b border-zinc-800 pb-1">
+                                            <p class="text-[9px] font-black text-blue-500 uppercase tracking-widest">Categories</p>
+                                            <button class="close-drawer-btn p-1 text-zinc-500 hover:text-white transition-colors" title="Close">
+                                                <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+                                                </svg>
+                                            </button>
                                         </div>
+                                        <div class="flex flex-wrap gap-2">{cat_html}</div>
                                     </div>
-                                </a>"""
+                                </div>
+                                <div class="card-info-wrapper p-5 flex flex-col gap-y-2">
+                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="no-underline flex flex-col gap-y-2 pointer-events-auto">
+                                        <h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate" title="{clean_title}">{clean_title}</h3>
+                                        <p class="text-[11px] text-zinc-400 leading-relaxed font-medium line-clamp-3">{description}</p>
+                                    </a>
+                                    <div class="card-footer pt-3 border-t border-zinc-800/50 flex justify-between items-center pointer-events-auto">
+                                        <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="view-source-btn inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">
+                                            View Source ↗
+                                        </a>
+                                        <button class="tag-btn p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="View Categories">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+                                            </svg>
+                                        </button>
+                                    </div>
+                                </div>"""
+                            
+                            tag_btn = card.querySelector(".tag-btn")
+                            drawer = card.querySelector(".category-drawer")
+                            close_btn = card.querySelector(".close-drawer-btn")
+                            
+                            async def toggle_drawer(e, dr=drawer, btn=tag_btn):
+                                e.preventDefault(); e.stopPropagation()
+                                dr.classList.toggle("drawer-open"); btn.classList.toggle("active")
+                            
+                            tag_btn.addEventListener("click", create_proxy(toggle_drawer))
+                            close_btn.addEventListener("click", create_proxy(toggle_drawer))
+
+                            for pill in card.querySelectorAll(".cat-pill"):
+                                async def jump_to_cat(e):
+                                    e.preventDefault(); e.stopPropagation()
+                                    target_cat = e.target.getAttribute("data-cat")
+                                    global current_category; current_category = target_cat
+                                    await rebuild_dropdown(); await reset_and_fetch()
+                                pill.addEventListener("click", create_proxy(jump_to_cat))
+
                             document.getElementById(f"col-{current_col_idx % cols}").appendChild(card)
                             current_col_idx += 1
-                
                 if has_reached_end:
                     document.getElementById("loading-spinner").classList.add("hidden")
                     document.getElementById("end-message").classList.remove("hidden")
-            except Exception as e:
-                print(f"Error fetching images: {e}")
+            except Exception as e: print(f"Error fetching images: {e}")
             is_loading = False
 
         # Event Handlers
@@ -319,213 +283,104 @@ Category:Pictures_of_the_Year_(2024)
             if e.key == "Enter":
                 val = e.target.value.strip()
                 if not val: return
-                
-                # Normalize prefix
-                if not val.lower().startswith("category:"): 
-                    val = "Category:" + val
-                else:
-                    # Fix casing of "Category:" prefix but preserve the rest
-                    val = "Category:" + val[9:]
-                
-                # First letter of title is usually uppercase in MediaWiki
-                if len(val) > 9:
-                    val = val[:9] + val[9].upper() + val[10:]
-                
-                # Validate if category exists
+                if not val.lower().startswith("category:"): val = "Category:" + val
+                else: val = "Category:" + val[9:]
+                if len(val) > 9: val = val[:9] + val[9].upper() + val[10:]
                 headers = {"User-Agent": USER_AGENT}
                 params = {"action": "query", "titles": val, "format": "json", "origin": "*"}
                 resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                data = await resp.json()
-                pages = data.get('query', {}).get('pages', {})
-                
+                data = await resp.json(); pages = data.get('query', {}).get('pages', {})
                 exists = False
                 for k, v in pages.items():
-                    if int(k) > 0: # Page ID > 0 means it exists
-                        exists = True
-                        val = v['title'] # Use the normalized title from API
-                
+                    if int(k) > 0: exists = True; val = v['title']
                 if exists:
-                    # Explicitly add to VIBE_CONFIG to make it "stick" for the session
                     current_vibe_lines = [l.strip() for l in VIBE_CONFIG.split('\n') if l.strip()]
                     current_cats = [l.split('|')[0].strip() for l in current_vibe_lines]
-                    
-                    if val not in current_cats:
-                        VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{val}"
-                    
-                    current_category = val
-                    e.target.value = ""
-                    await rebuild_dropdown()
-                    await reset_and_fetch()
-                else:
-                    window.alert(f"Category not found: {val}")
+                    if val not in current_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{val}"
+                    current_category = val; e.target.value = ""
+                    await rebuild_dropdown(); await reset_and_fetch()
+                else: window.alert(f"Category not found: {val}")
 
         async def handle_refresh(e):
             document.getElementById("refresh-icon").classList.add("animate-refresh")
-            await reset_and_fetch()
-            await asyncio.sleep(0.5)
-            document.getElementById("refresh-icon").classList.remove("animate-refresh")
+            await reset_and_fetch(); await asyncio.sleep(0.5); document.getElementById("refresh-icon").classList.remove("animate-refresh")
 
         def handle_edit_list(e):
-            global VIBE_CONFIG
-            document.getElementById("modal-error").classList.add("hidden")
-            document.getElementById("modal-textarea").value = VIBE_CONFIG.strip()
-            document.getElementById("edit-modal").classList.remove("hidden")
+            global VIBE_CONFIG; document.getElementById("modal-error").classList.add("hidden")
+            document.getElementById("modal-textarea").value = VIBE_CONFIG.strip(); document.getElementById("edit-modal").classList.remove("hidden")
 
-        def handle_modal_cancel(e):
-            document.getElementById("edit-modal").classList.add("hidden")
+        def handle_modal_cancel(e): document.getElementById("edit-modal").classList.add("hidden")
 
         async def handle_modal_save(e):
             global VIBE_CONFIG
-            
-            # Disable buttons and show loading
-            save_btn = document.getElementById("modal-save")
-            save_btn.disabled = True
-            document.getElementById("save-btn-text").classList.add("hidden")
-            document.getElementById("save-btn-loading").classList.remove("hidden")
+            save_btn = document.getElementById("modal-save"); save_btn.disabled = True
+            document.getElementById("save-btn-text").classList.add("hidden"); document.getElementById("save-btn-loading").classList.remove("hidden")
             document.getElementById("modal-error").classList.add("hidden")
-            
             new_config = document.getElementById("modal-textarea").value.strip()
             lines = [l.strip() for l in new_config.split('\n') if l.strip()]
-            
             cats_to_check = []
             for line in lines:
                 cat = line.split('|')[0].strip() if '|' in line else line.strip()
-                if not cat.lower().startswith("category:"):
-                    cat = "Category:" + cat
+                if not cat.lower().startswith("category:"): cat = "Category:" + cat
                 cats_to_check.append(cat)
-            
-            # MediaWiki API allows checking up to 50 titles at once
-            invalid_cats = []
-            normalized_lines = []
-            
-            # Batch check
             try:
-                # Batch check
                 headers = {"User-Agent": USER_AGENT}
-                params = {
-                    "action": "query",
-                    "titles": "|".join(cats_to_check),
-                    "format": "json",
-                    "origin": "*"
-                }
+                params = {"action": "query", "titles": "|".join(cats_to_check), "format": "json", "origin": "*"}
                 resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                data = await resp.json()
-                pages = data.get('query', {}).get('pages', {})
-                
-                # Map titles to existence and normalized form
-                title_map = {} # user_input_lower -> api_title or None
-                for k, v in pages.items():
-                    if int(k) < 0:
-                        # Missing
-                        title_map[v['title'].lower()] = None
-                    else:
-                        title_map[v['title'].lower()] = v['title']
-
-                # Reconstruct the config with normalized titles and find invalid ones
+                data = await resp.json(); pages = data.get('query', {}).get('pages', {})
+                title_map = {}
+                for k, v in pages.items(): title_map[v['title'].lower()] = v['title'] if int(k) >= 0 else None
+                normalized_lines = []; invalid_cats = []
                 for i, line in enumerate(lines):
-                    user_cat = cats_to_check[i]
-                    normalized_cat = title_map.get(user_cat.lower())
-                    
+                    user_cat = cats_to_check[i]; normalized_cat = title_map.get(user_cat.lower())
                     if normalized_cat:
-                        if '|' in line:
-                            label = line.split('|')[1].strip()
-                            normalized_lines.append(f"{normalized_cat} | {label}")
-                        else:
-                            normalized_lines.append(normalized_cat)
-                    else:
-                        invalid_cats.append(user_cat)
-                
+                        label = line.split('|')[1].strip() if '|' in line else None
+                        normalized_lines.append(f"{normalized_cat} | {label}" if label else normalized_cat)
+                    else: invalid_cats.append(user_cat)
                 if invalid_cats:
                     document.getElementById("modal-error").classList.remove("hidden")
                     document.getElementById("error-list").innerText = "Invalid categories: " + ", ".join(invalid_cats)
-                    save_btn.disabled = False
-                    document.getElementById("save-btn-text").classList.remove("hidden")
-                    document.getElementById("save-btn-loading").classList.add("hidden")
-                    return
-
-                VIBE_CONFIG = "\n".join(normalized_lines)
-                document.getElementById("edit-modal").classList.add("hidden")
-                await rebuild_dropdown()
-                await reset_and_fetch()
-                
-            except Exception as e:
-                print(f"Validation error: {e}")
-                window.alert("An error occurred during validation. Please try again.")
-            
-            save_btn.disabled = False
-            document.getElementById("save-btn-text").classList.remove("hidden")
-            document.getElementById("save-btn-loading").classList.add("hidden")
+                else:
+                    VIBE_CONFIG = "\n".join(normalized_lines); document.getElementById("edit-modal").classList.add("hidden")
+                    await rebuild_dropdown(); await reset_and_fetch()
+            except Exception as e: print(f"Validation error: {e}")
+            save_btn.disabled = False; document.getElementById("save-btn-text").classList.remove("hidden"); document.getElementById("save-btn-loading").classList.add("hidden")
 
         async def handle_select_change(e):
-            global current_category
-            current_category = e.target.value
-            await reset_and_fetch()
+            global current_category; current_category = e.target.value; await reset_and_fetch()
 
         async def handle_sort_toggle(e):
-            global sort_mode_shuffle
-            sort_mode_shuffle = not sort_mode_shuffle
-            
-            knob = document.getElementById("sort-knob")
-            toggle = document.getElementById("sort-toggle")
-            
-            if sort_mode_shuffle:
-                knob.style.transform = "translateX(20px)"
-                toggle.classList.replace("bg-zinc-700", "bg-purple-600")
-            else:
-                knob.style.transform = "translateX(0px)"
-                toggle.classList.replace("bg-purple-600", "bg-zinc-700")
-            
+            global sort_mode_shuffle; sort_mode_shuffle = not sort_mode_shuffle
+            document.getElementById("sort-knob").style.transform = "translateX(20px)" if sort_mode_shuffle else "translateX(0px)"
+            document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600") if sort_mode_shuffle else document.getElementById("sort-toggle").classList.replace("bg-purple-600", "bg-zinc-700")
             await reset_and_fetch()
 
         def handle_view_toggle(e):
-            global minimal_view
-            minimal_view = not minimal_view
-            
+            global minimal_view; minimal_view = not minimal_view
             document.getElementById("masonry-container").classList.toggle("minimal-mode")
-            knob = document.getElementById("view-knob")
-            toggle = document.getElementById("view-toggle")
-            
-            if minimal_view:
-                knob.style.transform = "translateX(-20px)"
-                toggle.classList.replace("bg-blue-600", "bg-zinc-800")
-            else:
-                knob.style.transform = "translateX(0px)"
-                toggle.classList.replace("bg-zinc-800", "bg-blue-600")
-            
+            document.getElementById("view-knob").style.transform = "translateX(-20px)" if minimal_view else "translateX(0px)"
+            document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800") if minimal_view else document.getElementById("view-toggle").classList.replace("bg-zinc-800", "bg-blue-600")
             update_url()
 
         async def setup():
             global sort_mode_shuffle, minimal_view, current_category, VIBE_CONFIG
-            
-            # Initial state from URL
             url_params = urllib.parse.parse_qs(window.location.search.lstrip('?'))
             url_cat = url_params.get('cat', [None])[0]
             if url_cat: 
                 current_category = url_cat
-                # Ensure injected URL cat is also in VIBE_CONFIG
                 lines = [line.strip() for line in VIBE_CONFIG.strip().split('\n') if line.strip()]
                 config_cats = [l.split('|')[0].strip() if '|' in l else l.strip() for l in lines]
-                if current_category not in config_cats:
-                    VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{current_category}"
-                
-            if url_params.get('sort', [''])[0] == 'shuffle': 
-                sort_mode_shuffle = True
-            if url_params.get('view', [''])[0] == 'min': 
-                minimal_view = True
-            
-            # Sync UI with initial state
+                if current_category not in config_cats: VIBE_CONFIG = VIBE_CONFIG.strip() + f"\n{current_category}"
+            if url_params.get('sort', [''])[0] == 'shuffle': sort_mode_shuffle = True
+            if url_params.get('view', [''])[0] == 'min': minimal_view = True
             if sort_mode_shuffle:
                 document.getElementById("sort-knob").style.transform = "translateX(20px)"
                 document.getElementById("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600")
-            
             if minimal_view:
                 document.getElementById("masonry-container").classList.add("minimal-mode")
                 document.getElementById("view-knob").style.transform = "translateX(-20px)"
                 document.getElementById("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800")
-            
             await rebuild_dropdown()
-            
-            # Attach Event Listeners
             document.getElementById("search-input").addEventListener("keydown", create_proxy(handle_search))
             document.getElementById("refresh-btn").addEventListener("click", create_proxy(handle_refresh))
             document.getElementById("edit-list-btn").addEventListener("click", create_proxy(handle_edit_list))
@@ -534,19 +389,12 @@ Category:Pictures_of_the_Year_(2024)
             document.getElementById("vibe-select").addEventListener("change", create_proxy(handle_select_change))
             document.getElementById("sort-toggle").addEventListener("click", create_proxy(handle_sort_toggle))
             document.getElementById("view-toggle").addEventListener("click", create_proxy(handle_view_toggle))
-            
-            # Infinite Scroll Observer
             def on_intersect(entries, observer):
                 for entry in entries:
-                    if entry.isIntersecting:
-                        asyncio.create_task(fetch_images())
-            
+                    if entry.isIntersecting: asyncio.create_task(fetch_images())
             observer = window.IntersectionObserver.new(create_proxy(on_intersect), window.Object.new())
-            observer.observe(document.getElementById("sentinel"))
-            
-            await reset_and_fetch()
+            observer.observe(document.getElementById("sentinel")); await reset_and_fetch()
 
-        # Start the app
         asyncio.create_task(setup())
     </script>
 </body>
