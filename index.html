@@ -123,21 +123,16 @@
         async def load_config():
             global VIBE_CONFIG
             saved = window.localStorage.getItem(LS_KEY)
-            if saved:
-                VIBE_CONFIG = saved
+            if saved: VIBE_CONFIG = saved
             else:
                 try:
                     resp = await pyfetch("categories.txt")
-                    if resp.ok:
-                        VIBE_CONFIG = (await resp.string()).strip()
-                        window.localStorage.setItem(LS_KEY, VIBE_CONFIG)
+                    if resp.ok: VIBE_CONFIG = (await resp.string()).strip(); window.localStorage.setItem(LS_KEY, VIBE_CONFIG)
                 except Exception as e:
-                    print(f"Error loading categories.txt: {e}")
-                    VIBE_CONFIG = "Category:Featured_pictures_on_Wikimedia_Commons | Featured"
+                    print(f"Error loading categories.txt: {e}"); VIBE_CONFIG = "Category:Featured_pictures_on_Wikimedia_Commons | Featured"
 
         def save_config():
-            global VIBE_CONFIG
-            window.localStorage.setItem(LS_KEY, VIBE_CONFIG.strip())
+            global VIBE_CONFIG; window.localStorage.setItem(LS_KEY, VIBE_CONFIG.strip())
 
         async def fetch_cat_info():
             global current_category
@@ -145,11 +140,9 @@
             params = {"action": "query", "titles": current_category, "prop": "categoryinfo", "format": "json", "origin": "*"}
             try:
                 resp = await pyfetch(f"https://commons.wikimedia.org/w/api.php?{urllib.parse.urlencode(params)}", headers=headers)
-                data = await resp.json()
-                pages = data.get('query', {}).get('pages', {})
+                data = await resp.json(); pages = data.get('query', {}).get('pages', {})
                 count = 0
-                for k, v in pages.items():
-                    count = v.get('categoryinfo', {}).get('files', 0)
+                for k, v in pages.items(): count = v.get('categoryinfo', {}).get('files', 0)
                 document.getElementById("cat-count").innerText = f"{count:,}"
             except: document.getElementById("cat-count").innerText = "0"
 
@@ -221,6 +214,13 @@
                     for page in pages_to_render:
                         if 'imageinfo' in page:
                             info = page['imageinfo'][0]; metadata = info.get('extmetadata', {}); clean_title = page['title'].replace("File:", "")
+                            file_url = info.get('url', '')
+                            is_video = file_url.lower().endswith(('.webm', '.ogv'))
+                            thumb_url = info.get('thumburl', '')
+                            # Get real dimensions for aspect ratio locking
+                            tw = info.get('thumbwidth', 1)
+                            th = info.get('thumbheight', 1)
+                            
                             cat_html = ""
                             if 'categories' in page:
                                 for cat_obj in page['categories']:
@@ -233,11 +233,23 @@
                                 
                             card = document.createElement("div")
                             card.className = "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6"
+                            
+                            media_html = ""
+                            if is_video:
+                                media_html = f"""
+                                <div class="relative w-full overflow-hidden bg-zinc-800 video-container" style="aspect-ratio: {tw}/{th}">
+                                    <img src="{thumb_url}" class="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-0" loading="lazy" onerror="this.src='https://commons.wikimedia.org/static/images/icons/file-type-video.svg'; this.className='w-12 h-12 m-auto opacity-20';">
+                                    <video src="{file_url}" class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 group-hover:opacity-100" muted loop playsinline preload="none" poster="{thumb_url}"></video>
+                                </div>"""
+                            else:
+                                media_html = f"""
+                                <div class="relative overflow-hidden bg-zinc-800" style="aspect-ratio: {tw}/{th}">
+                                    <img src="{thumb_url}" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy">
+                                </div>"""
+
                             card.innerHTML = f"""
-                                <div class="relative overflow-hidden bg-zinc-800 aspect-auto">
-                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block">
-                                        <img src="{info['thumburl']}" class="w-full h-auto transition-transform duration-700 group-hover:scale-105" loading="lazy">
-                                    </a>
+                                <div class="relative overflow-hidden media-wrapper">
+                                    <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="block">{media_html}</a>
                                     <div class="category-drawer absolute inset-x-0 bottom-0 z-40 p-4 translate-y-full max-h-[80%] overflow-y-auto">
                                         <div class="flex justify-between items-center mb-3 border-b border-zinc-800 pb-1">
                                             <p class="text-[9px] font-black text-blue-500 uppercase tracking-widest">Categories</p>
@@ -256,9 +268,7 @@
                                         <p class="text-[11px] text-zinc-400 leading-relaxed font-medium line-clamp-3">{description}</p>
                                     </a>
                                     <div class="card-footer pt-3 border-t border-zinc-800/50 flex justify-between items-center pointer-events-auto">
-                                        <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="view-source-btn inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">
-                                            View Source ↗
-                                        </a>
+                                        <a href="https://commons.wikimedia.org/wiki/{urllib.parse.quote(page['title'])}" target="_blank" class="view-source-btn inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</a>
                                         <button class="tag-btn p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="View Categories">
                                             <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
@@ -266,6 +276,15 @@
                                         </button>
                                     </div>
                                 </div>"""
+                            
+                            if is_video:
+                                video_container = card.querySelector(".video-container"); video_el = card.querySelector("video")
+                                async def on_video_enter(e, vid=video_el):
+                                    try: await vid.play()
+                                    except: pass
+                                def on_video_leave(e, vid=video_el): vid.pause(); vid.currentTime = 0
+                                video_container.addEventListener("mouseenter", create_proxy(on_video_enter)); video_container.addEventListener("mouseleave", create_proxy(on_video_leave))
+
                             tag_btn = card.querySelector(".tag-btn"); drawer = card.querySelector(".category-drawer"); close_btn = card.querySelector(".close-drawer-btn")
                             async def toggle_drawer(e, dr=drawer, btn=tag_btn):
                                 e.preventDefault(); e.stopPropagation(); dr.classList.toggle("drawer-open"); btn.classList.toggle("active")
@@ -280,8 +299,7 @@
                                     await rebuild_dropdown(); await reset_and_fetch()
                                 pill.addEventListener("click", create_proxy(jump_to_cat))
                             document.getElementById(f"col-{current_col_idx % cols}").appendChild(card); current_col_idx += 1
-                if has_reached_end:
-                    document.getElementById("loading-spinner").classList.add("hidden"); document.getElementById("end-message").classList.remove("hidden")
+                if has_reached_end: document.getElementById("loading-spinner").classList.add("hidden"); document.getElementById("end-message").classList.remove("hidden")
             except Exception as e: print(f"Error fetching images: {e}")
             is_loading = False
 
