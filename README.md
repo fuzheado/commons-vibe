@@ -1,12 +1,12 @@
 # CommonsVibe: A Visual Feed Explorer for Wikimedia Commons
 
-Wikimedia Commons is a one of the best free image collections in the world, but it was built for being a "file warehouse," not as a user experience. 
+Wikimedia Commons is one of the best free image collections in the world, but it was built to be a "file warehouse," not as a user experience. 
 
-**CommonsVibe** aims to provide an easy to use, modern, visually rich, and serendipitous discovery feed explorer.
+**CommonsVibe** aims to provide an easy-to-use, modern, visually rich, and serendipitous discovery feed explorer.
 
-Designed for the curious user rather than the technical expert, CommonsVibe brings a "Pinterest-style" feed to the Commons, making it easy to more easily surf the world's largest free media library.
+Designed for the curious user rather than the technical expert, CommonsVibe brings a "Pinterest-style" feed to the Commons, making it easy to surf the world's largest free media library.
 
-A running version can be found at: https://commons-vibe.toolforge.org/
+* **A running version can be found at: https://commons-vibe.toolforge.org/**
 ---
 
 ## The Experience
