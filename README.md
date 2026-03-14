@@ -6,6 +6,7 @@ Wikimedia Commons is a one of the best free image collections in the world, but 
 
 Designed for the curious user rather than the technical expert, CommonsVibe brings a "Pinterest-style" feed to the Commons, making it easy to more easily surf the world's largest free media library.
 
+A running version can be found at: https://commons-vibe.toolforge.org/
 ---
 
 ## The Experience
