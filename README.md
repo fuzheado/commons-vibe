@@ -20,7 +20,7 @@ CommonsVibe uses a **responsive masonry grid** to showcase images in a fluid, vi
 Most users aren't familiar with the intricate category tree of Wikimedia Commons. To assist in this:
 * **Curated Seeds:** Start your journey with "Best of" collections like *Pictures of the Year*, *Featured Pictures*, or *Quality Images*.
 * **Custom Entry:** If you know a specific category name, simply enter it in to generate a custom feed instantly.
-* **Deep Context:** Every image tile includes a description. Want to go deeper? A simple dropdown menu reveals every category the file belongs to, and with "parent" categories, allowing you to "teleport" to related areas quickly.
+* **Deep Context:** Every image tile includes a description. Want to go deeper? A simple pop-up menu reveals every category the file belongs to, allowing you to "teleport" to related areas quickly, whether they are visible or hidden categories.
 
 ### Shareable States
 The entire state of your browser is captured in the URL.
@@ -47,7 +47,7 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **Advanced Layouts:** Easy toggling between "Compact" views for rapid browsing and "Detailed" views for high-resolution appreciation.
-* **Filering:** Filter based on filetype (eg. no TIF files), useful display of video files, 
+* **Filtering:** Filter based on filetype (eg. no TIF files, only WEBM files), more advanced display of media files.
 
 ---
 
