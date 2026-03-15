@@ -4,9 +4,15 @@ Wikimedia Commons is one of the best free image collections in the world, but it
 
 **CommonsVibe** aims to provide an easy-to-use, modern, visually rich, and serendipitous discovery feed explorer.
 
-Designed for the curious user rather than the technical expert, CommonsVibe brings a "Pinterest-style" feed to the Commons, making it easy to surf the world's largest free media library.
+Designed for the curious user rather than the technical expert, CommonsVibe brings a "Pinterest-style" feed to the Commons categories, making it easy to explore collections visually.
 
-* **A running version can be found at: https://commons-vibe.toolforge.org/**
+## Quick start 
+* **Visually examine a specific category** by selecting a category from the pull-down menu, and "minimum" mode to isolate just the images.
+* **Use shuffle mode on a large category** with "detail" mode on to quickly explore the variety.
+* **Jump to different categories** by selecting the image's "tag' button to bring up Commons categories you can click on, visible or hidden.
+* **Quickly scrub and play video** by visiting a category of WebM videos, and hovering your pointer (or clicking on mobile) to immediately preview the video without sound.
+
+## **A running version can be found at: https://commons-vibe.toolforge.org/**
 
 ![Screenshot](https://github.com/fuzheado/commons-vibe/blob/main/commons-vibe-screenshot-featured.png "Screenshot")
 
