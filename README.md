@@ -8,7 +8,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 
 ## Quick start 
 * **Visually examine a specific category** by selecting a category from the pull-down menu, and "minimum" mode to isolate just the images.
-* **Use shuffle mode on a large category** with "detail" mode on to quickly explore the variety.
+* **Use shuffle mode on a large category** with the "detail" setting to quickly explore the variety of a category.
 * **Jump to different categories** by selecting the image's "tag' button to bring up Commons categories you can click on, visible or hidden.
 * **Quickly scrub and play video** by visiting a category of WebM videos, and hovering your pointer (or clicking on mobile) to immediately preview the video without sound.
 
