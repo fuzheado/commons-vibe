@@ -4,13 +4,14 @@
 A stateless, high-performance visual discovery tool for Wikimedia Commons categories. It must provide a "Pinterest-style" masonry experience while overcoming the alphabetical bias of the MediaWiki API.
 
 ## 2. Core Architecture
-- **Language:** Python 3.x (running via [PyScript/Pyodide 2026.1.1](https://pyscript.net/)).
+- **Language:** Vanilla JavaScript (ES module, `app.js`). Replaced the original PyScript/Pyodide runtime (2026-08) — the app is DOM/API glue with no Python-specific compute, and the ~10 MB WASM runtime cost outweighed any benefit. No build step, no framework.
 - **UI Framework:** Tailwind CSS (CDN-loaded).
 - **Styles:** Custom CSS maintained in `style.css`.
 - **Configuration:** 
     - Default categories loaded from external `categories.txt`.
     - User settings and custom category lists persist via browser `localStorage`.
-- **Deployment Target:** Wikimedia Toolforge (Static hosting via PHP runtime).
+    - API responses cached client-side (in-memory + localStorage) with per-endpoint TTLs; random/shuffle queries are never cached.
+- **Deployment Target:** Wikimedia Toolforge (Static hosting via PHP runtime, currently php8.4).
 - **Data Source:** [MediaWiki Action API](https://commons.wikimedia.org/w/api.php).
 
 ## 3. Technical Specifications

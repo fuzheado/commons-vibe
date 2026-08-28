@@ -63,6 +63,9 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 ## Technical Overview
 
 CommonsVibe is built to be lightweight and URL-driven.
-* **API:** Interacts directly with the Wikimedia Action API and CirrusSearch.
+* **Engine:** Vanilla JavaScript (ES module) — no framework, no build step, no PyScript/Pyodide runtime. The app ships as `index.html` + `app.js` + `style.css` and boots instantly.
+* **API:** Interacts directly with the Wikimedia Action API and CirrusSearch, with a client-side response cache (localStorage + in-memory, TTL per endpoint kind) so repeat visits and back-navigation are instant.
+* **Infinite Scroll:** One-batch prefetch lookahead keeps the grid feeding smoothly; stale requests are aborted.
+* **Media:** Hover-to-play video with `preload="none"` (no bytes until hover), retina-aware thumbnails derived from the 600px base thumb, robust video/audio detection via API `mediatype`/`mime` fields.
 * **Routing:** Heavy emphasis on URL parameter persistence to ensure the "Shareable View" philosophy.
 * **Frontend:** Designed for high-performance image rendering and "lazy loading" patterns.
