@@ -1,0 +1,8 @@
+# Prevent the web from seeing Markdown files
+<FilesMatch "\.(md)$">
+    Order allow,deny
+    Deny from all
+</FilesMatch>
+
+# Hide the .idx folder if you have one
+RedirectMatch 404 /\.idx
