@@ -14,6 +14,10 @@ Live at **https://commons-vibe.toolforge.org/**.
 - **Engine:** Vanilla JS ES module (`app.js`). The PyScript/Pyodide 2026.1.1 build was
   fully replaced (commit `77a3e93`) — the app is DOM/API glue, and the ~10 MB WASM
   runtime was pure overhead. **Do not reintroduce PyScript.**
+- **v1.6 — Category tree (shipped):** tree modal (browse current category to depth
+  1–5 with file/subcat counts, lazy expand), inline treebar (parent + subcategory
+  chips with file counts), and Deep mode (shuffle across the whole subtree via
+  CirrusSearch `deepcategory`, URL param `deep=1`). See "Category tree (v1.6)" below.
 - **Deployed:** Live site is byte-identical to GitHub `main` (verified via SHA256,
   local ↔ server ↔ live web). Both production bugs found during the rewrite are fixed
   live (see below).
@@ -32,11 +36,15 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `.htaccess` | Blocks `*.md` from web; 404s `.idx`. NOTE: `*.txt` must stay servable (app fetches `categories.txt`). |
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
+| `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min`. Written with
-  `history.replaceState` on every state change; the logo (`href="/"`) is the reset.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min[&deep=1][&tree=1&depth=N]`.
+  Written with `history.replaceState` on every state change; the logo (`href="/"`) is the
+  reset. `deep=1` implies shuffle (deep sampling uses the search API); the header "Tree"
+  badge shows when it's active and toggles it off. `tree=1&depth=N` boots with the tree
+  modal open at depth N; both params drop when the modal closes.
 - **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines)
   and `cv_api_cache_v1` (API response cache).
 - Categories visited via search/pills/URL are auto-added to `vibe_config`.
@@ -64,6 +72,15 @@ python3 -m http.server 8123        # any static server works; no build step
 8. Copy URL → open in new tab → same view.
 9. Reload a visited category → zero `api.php` network requests (cache hit).
 10. Console: no errors beyond favicon 404 + Tailwind CDN warning (both pre-existing).
+11. Tree modal (👥 button) → depth select 1–5 auto-expands that many levels;
+    clicking a category name navigates; ▸ toggles lazy one-level expansion.
+12. Treebar above grid → "↑" parent chips and "↳" subcategory chips (file counts);
+    chips navigate; "+N more" opens the tree modal.
+13. "Shuffle Entire Subtree" in tree modal → `sort=shuffle&deep=1` in URL, purple
+    `Deep ✓` chip appears in the sort pill (next to Shuffle) and a purple explainer
+    banner (category name + Turn Off button) shows above the grid; clicking the chip
+    or the banner's Turn Off returns to plain shuffle (`deep` dropped). Switching
+    back to Alpha also drops deep. Banner/chip state is synced by `syncDeepUI()`.
 
 ## Deploy to Toolforge
 
@@ -111,13 +128,84 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 
 - `api()` / `cacheGet` / `cachePut` — API layer with cache + retry.
 - `state` — all mutable state; `requestId` guards stale renders.
-- `fetchBatch()` — alpha (generator+continue token, cacheable) vs shuffle
-  (CirrusSearch random, 24 results → dedupe → 12) in one place.
+- `fetchBatch()` — alpha (generator+continue token, cacheable) vs shuffle in one place.
+  Shuffle draws via `flatSampleTitles()` (single category) or `deepSampleTitles()`
+  (deep mode) — both `srsort=random&srlimit=50` → `pickNewTitles()` dedupe → 12.
+- `collectSubtree()` / `deepSampleTitles()` — deep-mode sampler (see below).
 - `getBatch()` / `prefetchNext()` — one-batch lookahead queue.
 - `fetchImages()` — orchestration + sentinel fill-up loop (`lastBatchOk`).
 - `buildCard()` — tile DOM; `pickBestVideo()`, `srcsetFor()`, drawer/pill wiring.
 - `resetAndFetch()` — clears grid, bumps requestId, aborts, refetches.
 - `init()` — URL param bootstrap, event binding, IntersectionObserver.
+
+### Category tree (v1.6)
+
+- `getCatInfo(titles)` — batched `categoryinfo` (files + subcats), 50/call, keyed
+  by `normCat` (underscore/space safe).
+- `fetchParents(cat)` — `prop=categories&clnamespace=14&clprop=hidden`.
+- `buildTreeLevel(cat)` — `cmtype=subcat` members + counts; the one tree primitive.
+- `fetchTreebar()` — fills the ↑ parents / ↳ subcats chip rows on every reset.
+- `openTreeModal()` / `loadTree()` / `renderTreeChildren()` / `treeRowEl()` — the
+  depth-N auto-expanding modal tree; `TREE_MAX_NODES = 300` caps runaway trees;
+  `treeReqId` (bumped by `resetAndFetch`) kills stale renders.
+- `handleTreeDeep()` / `handleDeepOff()` / `syncSortUI()` — deep mode plumbing.
+
+### Deep shuffle algorithm (v1.7)
+
+`deepcategory:"X"` (CirrusSearch) is silently truncated: depth capped at 5
+(`$wgCirrusSearchCategoryDepth`), category-count capped (`$wgCirrusSearchCategoryMax`),
+and the expansion just stops at the cap (Phab T246568/T260152) — so random draws over it
+are biased toward whatever survived the clip. Instead:
+
+1. `collectSubtree()` walks the subtree client-side (BFS, depth 5 / 500-node cap,
+   cycle-safe via `normCat` set), gathering each category's **direct** file count
+   from `categoryinfo` — all through the 24h/7d cache, so the walk cost is paid once.
+2. Pick one category uniformly weighted by direct file count.
+3. Draw `srsearch=incategory:"chosen"&srsort=random&srlimit=50` — exact, uncapped.
+
+While the walk is still running (cold cache, ~1–4 min for big trees), batches fall
+back to a `deepcategory:` draw so tiles appear immediately; once it lands, batches
+switch to the exact weighted sampler automatically. `state.deepWalk` is reset per
+category by `resetAndFetch()`.
+
+Trade-off: files in many categories get multiple tickets (uniform over categories,
+not perfectly over files — measured below). If the walk finds no direct files
+anywhere, it falls back to the old `deepcategory:` draw.
+
+`apiThrottle()` (150ms global gap between request starts) keeps the walk under the
+429 threshold; sustained heavy testing can still earn sporadic 429s, which the
+existing exponential-backoff retry absorbs.
+
+### Benchmark results (benchmark/deep-shuffle.js)
+
+Ground truth: full enumeration of Category:Featured pictures of birds (401
+categories to natural exhaustion at depth 4, 1,792 distinct files, every file's
+membership listed). Run: `node benchmark/deep-shuffle.js [Category:...] [--live]`
+(cache in `cache/bench/`, ~5 min cold at 300ms pacing).
+
+- **Coverage:** the sampler envelope sees **100%** of the tree's files at the
+  500-node cap (a 200-node cap saw only 67.8% — the node cap, not depth, was the
+  binding constraint; this tree never exceeds depth 4). Trees deeper than 5 levels
+  would penalize the old `deepcategory:` envelope instead.
+- **Uniformity:** per-file selection probability is 0.73x–2.18x of ideal (bounded
+  by category-membership multiplicity: 65% of files in 1 category, 32% in 2, 3%
+  in 3). Mean absolute deviation from a fair coin is ~0.02%.
+- **Weighted pick:** chi-square over 100k simulated picks: p = 0.54 / 0.52 / 0.02
+  across reps — consistent with weighted-uniform (the single 0.02 is a 2σ tail;
+  synthetic-shape controls also scatter 0.11–0.76).
+- **Server random:** 40 live `srsort=random` draws over a 36-file category returned
+  every file exactly 40 times — no measurable server-side bias in `incategory` draws.
+- Verdict: fair within the documented multiplicity trade-off — worst case a file is
+  ~2.2x likelier than a single-category file, best case ~0.73x.
+
+### Future: exact full-tree sampling (option 3)
+
+For perfectly uniform-over-files sampling at arbitrary depth, enumerate the whole
+subtree once (client-side walker without the node cap, or a PetScan query with its
+category-depth parameter — PSID cacheable) and store the flat file list; then deep
+shuffle = random slices of that list. Natural fit with the planned List/Snapshot
+mode (file IDs via URL). Cost: minutes for huge trees, stale after mass uploads —
+fine for a snapshot feature, wrong for a live shuffle.
 
 ## Known issues / open items
 
@@ -139,16 +227,12 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 
 ## Next features (staged plan, all API-verified)
 
-Category-tree exploration — the agreed direction:
+Category-tree exploration — **Stage A + B core shipped in v1.6** (treebar, tree
+modal to depth 5, deep mode). Remaining:
 
-- **Stage A (cheap):** breadcrumb trail of parent categories (`prop=categories`,
-  filter ns=14) + subcategory chip row with file-count badges (one `cmtype=subcat` call
-  + one batched `categoryinfo` call), both clickable to navigate.
-- **Stage B:** "Include subcategories" (deep mode) toggle — swap `incategory:` for
-  `deepcategory:"X"` in the shuffle engine (verified live: returns the whole subtree;
-  note CirrusSearch caps depth at ~5). Plus expand-on-demand tree sidebar with
-  leaf-category highlighting (dedupe against a visited set — the Commons category graph
-  is a DAG with cycles).
+- **Stage B leftover:** leaf-category highlighting / dedupe against a visited set
+  (the Commons category graph is a DAG with cycles — the node cap handles runaway
+  traversal, but a visited-set would tighten it).
 - **Stage C:** multi-select union feeds, "category roulette" (random subcategory),
   tree-aware URL state (`path=Root/A/B`) so back/forward walks the tree.
 

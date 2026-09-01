@@ -92,6 +92,20 @@
     transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+/* Category tree (treebar + tree modal) */
+.tree-row:hover {
+    background: rgba(39, 39, 42, 0.6);
+}
+
+.tree-row .tree-name {
+    min-width: 0;
+}
+
+.tree-children {
+    border-left: 1px solid rgba(63, 63, 70, 0.4);
+    margin-left: 6px;
+}
+
 @keyframes spin {
     from { transform: rotate(0deg); }
     to { transform: rotate(360deg); }

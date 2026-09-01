@@ -10,6 +10,9 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Visually examine a specific category** by selecting a category from the pull-down menu, and "Minimal" mode to isolate just the images.
 * **Use shuffle mode on a large category** with the "Detailed" setting to quickly explore the variety of a category.
 * **Jump to different categories** by selecting the image's "tag" button to bring up Commons categories you can click on, visible or hidden.
+* **Browse the category tree** via the tree button (👥): see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories.
+* **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.
+* **Shareable tree views:** `&tree=1&depth=N` boots with the tree modal open at your chosen depth.
 * **Quickly scrub and play video** by visiting a category of WebM videos and hovering your pointer over a tile to preview it without sound. (On mobile, tapping a tile opens the file page on Commons.)
 
 ## **A running version can be found at: https://commons-vibe.toolforge.org/**
@@ -54,7 +57,7 @@ Both modes work in **Detailed** (filename + 3-line description) and **Minimal** 
 
 CommonsVibe is evolving from a browser into a personal curation tool. Planned features include:
 
-* **Category Tree Exploration:** Breadcrumb trail of the current category's parents, a subcategory chip row with file counts for drill-down, and an "include subcategories" (deep) mode that searches the whole subtree — see `HANDOFF.md` for the staged plan.
+* **~~Category Tree Exploration~~ — shipped in v1.6:** tree modal (depth 1–5, lazy expand, file-count badges), parent/subcategory chip row, and Deep mode (`deepcategory` shuffle across the whole subtree, `?deep=1` in the URL). Still open from the original plan: multi-select union feeds, "category roulette", tree-aware `path=` URL state.
 * **List Mode:** A curated "Snapshot" mode. This allows the app to load a specific set of files via their unique IDs passed through the URL—perfect for sharing a specific "vibe" or a curated set of random finds that you want to preserve for someone else.
 * **Personal Collections:** The ability to "clip" or save images into your own custom sets.
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
@@ -94,7 +97,7 @@ Repeat for `app.js`, `style.css`, `categories.txt`, `.htaccess`. Static-file cha
 
 CommonsVibe is built to be lightweight and URL-driven.
 * **Engine:** Vanilla JavaScript (ES module) — no framework, no build step. The app ships as `index.html` + `app.js` + `style.css` and boots instantly (previously PyScript/Pyodide; replaced August 2026).
-* **API:** Interacts directly with the Wikimedia Action API and CirrusSearch, with a client-side response cache (localStorage + in-memory, TTL per endpoint kind) so repeat visits and back-navigation are instant.
+* **API:** Interacts directly with the Wikimedia Action API and CirrusSearch, with a client-side response cache (localStorage + in-memory, TTL per endpoint kind) so repeat visits and back-navigation are instant. Category-tree data (v1.6: parents, subcats, counts) flows through the same cache — tree re-opens are instant.
 * **Infinite Scroll:** One-batch prefetch lookahead keeps the grid feeding smoothly; stale requests are aborted.
 * **Media:** Hover-to-play video with `preload="none"` (no bytes until hover), retina-aware thumbnails derived from the 600px base thumb, robust video/audio detection via API `mediatype`/`mime` fields.
 * **Routing:** Heavy emphasis on URL parameter persistence to ensure the "Shareable View" philosophy.
