@@ -9,6 +9,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 ## Quick start 
 * **Visually examine a specific category** by selecting a category from the pull-down menu, and "Minimal" mode to isolate just the images.
 * **Use shuffle mode on a large category** with the "Detailed" setting to quickly explore the variety of a category.
+* **Dial the tile density** with the S/M/L control — from a 6-column wall of thumbnails down to big single-column previews — and the grid reflows instantly.
 * **Jump to different categories** by selecting the image's "tag" button to bring up Commons categories you can click on, visible or hidden.
 * **Browse the category tree** via the tree button (👥): see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories.
 * **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.

@@ -89,6 +89,11 @@
                 </div>
 
                 <div class="flex gap-4 border-l border-zinc-800 pl-4">
+                    <div id="size-toggle" class="flex items-center gap-1 bg-zinc-900/50 p-1 px-2 rounded-full border border-zinc-800" title="Tile size">
+                        <button data-size="s" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">S</button>
+                        <button data-size="m" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">M</button>
+                        <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">L</button>
+                    </div>
                     <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
                         <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Alpha</span>
                         <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner">
@@ -127,12 +132,7 @@
                 <span id="treebar-subs" class="flex flex-wrap items-center gap-2"></span>
             </div>
         </div>
-        <div id="masonry-container" class="masonry-container flex flex-row gap-6 items-start">
-            <div id="col-0" class="masonry-col flex flex-col gap-6"></div>
-            <div id="col-1" class="masonry-col hidden sm:flex flex-col gap-6"></div>
-            <div id="col-2" class="masonry-col hidden lg:flex flex-col gap-6"></div>
-            <div id="col-3" class="masonry-col hidden xl:flex flex-col gap-6"></div>
-        </div>
+        <div id="masonry-container" class="masonry-container flex flex-row gap-6 items-start"></div>
         <div id="bottom-status" class="py-20 text-center">
             <div id="loading-spinner" class="animate-spin rounded-full h-6 w-6 border-t-2 border-blue-500 mx-auto"></div>
             <h2 id="end-message" class="hidden text-sm text-zinc-600 uppercase tracking-widest mt-4 font-bold">End of Collection</h2>

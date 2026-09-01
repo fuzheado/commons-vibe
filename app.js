@@ -1,7 +1,9 @@
-/* CommonsVibe — vanilla JS engine (v1.7)
+/* CommonsVibe — vanilla JS engine (v1.8)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
+ * Tile size control (v1.8): S/M/L density, shortest-column placement, full
+ * reflow on size change and window resize. URL param size=s|m|l.
  * Replaces the PyScript/Pyodide runtime (2026.1.1).
  * Same public URL contract: ?cat=<Category>&sort=alpha|shuffle&view=det|min
  * Same localStorage key: vibe_config
@@ -22,7 +24,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.7 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.8 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -32,11 +34,14 @@ const state = {
   continueToken: null,           // alpha-mode paging token
   isLoading: false,
   hasReachedEnd: false,
-  colIdx: 0,
   seenTitles: new Set(),         // shuffle-mode dedupe within a session
   deepMode: false,               // shuffle across the whole subcategory tree
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
+  size: "m",                     // tile density s|m|l (URL param size=)
+  items: [],                     // placed cards in fetch order (reflow source)
+  colCount: 0,                   // live column count
+  colHeights: [],                // tracked column heights for shortest-col place
   deepWalk: null,                // in-flight/resolved subtree walk (deep mode)
   requestId: 0,                  // stale-response guard
   abort: new AbortController(),
@@ -240,6 +245,7 @@ function updateURL() {
     view: state.minimalView ? "min" : "det",
   });
   if (state.deepMode) params.set("deep", "1");
+  params.set("size", state.size);
   if (state.treeOpen) {
     params.set("tree", "1");
     params.set("depth", String(state.treeDepth));
@@ -548,16 +554,97 @@ function srcsetFor(thumbUrl) {
   return `${thumbUrl} 1x, ${retina} 2x`;
 }
 
+/* ---------------- tile layout (size setting + reflow) ---------------- */
+
+// Column counts per density setting, indexed by breakpoint tier
+// (0: <640, 1: <1024, 2: <1280, 3: >=1280) — same tiers as the old
+// hidden-column classes. "m" reproduces the pre-v1.8 layout exactly.
+const SIZE_COLS = { s: [2, 3, 4, 6], m: [1, 2, 3, 4], l: [1, 2, 2, 3] };
+const BREAKPOINTS = [640, 1024, 1280];
+
+function breakpointTier() {
+  let t = 0;
+  for (const bp of BREAKPOINTS) if (window.innerWidth >= bp) t++;
+  return t;
+}
+
+function currentCols() {
+  return (SIZE_COLS[state.size] || SIZE_COLS.m)[breakpointTier()];
+}
+
+function ensureColumns(n) {
+  const container = $("masonry-container");
+  if (state.colCount === n && container.children.length === n) return;
+  state.colCount = n;
+  state.colHeights = new Array(n).fill(0);
+  container.innerHTML = "";
+  for (let i = 0; i < n; i++) {
+    const col = document.createElement("div");
+    col.className = "masonry-col flex flex-col gap-6";
+    container.appendChild(col);
+  }
+}
+
+// Place a card in the shortest column using tracked heights. Cards carry their
+// media aspect ratio (style="aspect-ratio"), so offsetHeight is stable even
+// before lazy images load.
+function placeCard(card) {
+  let col = 0;
+  for (let i = 1; i < state.colHeights.length; i++) {
+    if (state.colHeights[i] < state.colHeights[col]) col = i;
+  }
+  const colEl = $("masonry-container").children[col];
+  colEl.appendChild(card);
+  state.colHeights[col] += card.offsetHeight || 0;
+}
+
+// Redistribute all placed cards for the current size/viewport. Moving DOM
+// nodes keeps listeners and loaded images (no re-fetch).
+function reflow() {
+  ensureColumns(currentCols());
+  state.colHeights = new Array(state.colCount).fill(0);
+  const items = state.items;
+  state.items = [];
+  for (const card of items) {
+    state.items.push(card);
+    placeCard(card);
+  }
+}
+
+let resizeTimer = null;
+function handleResize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (currentCols() !== state.colCount) reflow();
+  }, 150);
+}
+
+function setSize(s) {
+  if (!SIZE_COLS[s] || state.size === s) return;
+  state.size = s;
+  syncSizeUI();
+  updateURL();
+  reflow();
+}
+
+function syncSizeUI() {
+  for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
+    const active = btn.getAttribute("data-size") === state.size;
+    btn.classList.toggle("bg-blue-600", active);
+    btn.classList.toggle("text-white", active);
+    btn.classList.toggle("text-zinc-500", !active);
+    btn.classList.toggle("hover:text-white", !active);
+  }
+}
+
 function renderPages(pages) {
-  const cols = [1, 2, 3, 4][
-    (window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)
-  ];
+  ensureColumns(currentCols());
   for (const page of pages) {
     if (!("imageinfo" in page) && !("videoinfo" in page)) continue;
     const card = buildCard(page);
     if (!card) continue;
-    $("col-" + (state.colIdx % cols)).appendChild(card);
-    state.colIdx++;
+    state.items.push(card);
+    placeCard(card);
   }
 }
 
@@ -1008,14 +1095,15 @@ function resetAndFetch() {
   prefetchPromise = null; // drop any in-flight prefetch for the old category
   lastBatchOk = false;
   state.isLoading = false;
-  state.colIdx = 0;
   state.hasReachedEnd = false;
   state.continueToken = null;
   state.seenTitles = new Set();
   $("end-message").classList.add("hidden");
   $("load-error").classList.add("hidden");
   $("loading-spinner").classList.remove("hidden");
-  for (let i = 0; i < 4; i++) $("col-" + i).innerHTML = "";
+  state.items = [];
+  $("masonry-container").innerHTML = "";
+  ensureColumns(currentCols());
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
@@ -1207,6 +1295,9 @@ async function init() {
   const urlDepth = parseInt(params.get("depth"), 10);
   if (urlDepth >= 1 && urlDepth <= 5) state.treeDepth = urlDepth;
   $("tree-depth").value = String(state.treeDepth);
+  const urlSize = params.get("size");
+  if (SIZE_COLS[urlSize]) state.size = urlSize;
+  syncSizeUI();
 
   rebuildDropdown();
   $("search-input").addEventListener("keydown", handleSearch);
@@ -1223,6 +1314,10 @@ async function init() {
   $("tree-deep-btn").addEventListener("click", handleTreeDeep);
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
+  for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
+    btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
+  }
+  window.addEventListener("resize", handleResize);
   // Chip navigation (treebar chips + tree rows) via delegation.
   document.body.addEventListener("click", (e) => {
     const chip = e.target.closest("[data-cat]");

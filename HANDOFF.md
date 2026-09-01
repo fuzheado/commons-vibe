@@ -40,11 +40,12 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min[&deep=1][&tree=1&depth=N]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l[&deep=1][&tree=1&depth=N]`.
   Written with `history.replaceState` on every state change; the logo (`href="/"`) is the
-  reset. `deep=1` implies shuffle (deep sampling uses the search API); the header "Tree"
-  badge shows when it's active and toggles it off. `tree=1&depth=N` boots with the tree
-  modal open at depth N; both params drop when the modal closes.
+  reset. `size=` picks tile density (S/M/L header toggle; `m` = classic 1–4 columns).
+  `deep=1` implies shuffle (deep sampling uses the search API); the "Deep ✓" chip in the
+  sort pill shows when it's active and toggles it off. `tree=1&depth=N` boots with the
+  tree modal open at depth N; both params drop when the modal closes.
 - **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines)
   and `cv_api_cache_v1` (API response cache).
 - Categories visited via search/pills/URL are auto-added to `vibe_config`.
@@ -81,6 +82,11 @@ python3 -m http.server 8123        # any static server works; no build step
     banner (category name + Turn Off button) shows above the grid; clicking the chip
     or the banner's Turn Off returns to plain shuffle (`deep` dropped). Switching
     back to Alpha also drops deep. Banner/chip state is synced by `syncDeepUI()`.
+14. Size toggle (S/M/L, left of the sort pill) → column count changes per
+    `SIZE_COLS`, all cards conserved through the reflow (no losses, no image
+    re-fetches), `size=` in URL round-trips. Resize the window across the 640/
+    1024/1280 breakpoints — card count must never change (the pre-v1.8 resize
+    bug). Works in minimal mode too.
 
 ## Deploy to Toolforge
 
@@ -149,6 +155,19 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   depth-N auto-expanding modal tree; `TREE_MAX_NODES = 300` caps runaway trees;
   `treeReqId` (bumped by `resetAndFetch`) kills stale renders.
 - `handleTreeDeep()` / `handleDeepOff()` / `syncSortUI()` — deep mode plumbing.
+
+### Tile layout (v1.8)
+
+- `SIZE_COLS` — column counts per density (s/m/l) × breakpoint tier (<640/<1024/<1280/≥1280).
+  `m` reproduces the pre-v1.8 layout exactly.
+- `state.items[]` — placed cards in fetch order; the reflow source of truth.
+- `ensureColumns()` / `placeCard()` / `reflow()` — shortest-column placement using
+  tracked heights (one `offsetHeight` read per card; media boxes carry CSS
+  aspect-ratio so heights are stable before lazy images load). Reflow moves DOM
+  nodes (listeners + loaded images survive; no re-fetch). Runs on size toggle and
+  debounced window resize — this also fixed the old bug where shrinking the
+  viewport made cards vanish (hidden `col-2`/`col-3` divs).
+- Columns are created dynamically; the old hardcoded `#col-0..3` divs are gone.
 
 ### Deep shuffle algorithm (v1.7)
 
