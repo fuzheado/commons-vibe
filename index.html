@@ -59,6 +59,36 @@
         </div>
     </div>
 
+    <div id="about-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-6 pb-2">
+                <h2 class="text-lg font-bold text-white uppercase tracking-tighter italic">About <span class="text-blue-500">CommonsVibe</span></h2>
+                <button id="about-close" class="p-1 text-zinc-500 hover:text-white transition-colors" title="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="px-6 pb-6 pt-2 overflow-y-auto text-sm text-zinc-300 space-y-4">
+                <p><strong class="text-white">CommonsVibe</strong> is a visual explorer for <a href="https://commons.wikimedia.org/" target="_blank" class="text-blue-400 hover:underline">Wikimedia Commons</a> — a collection of over 100 million freely licensed images, videos, and sounds. Commons was built as a file warehouse; this tool turns it into a serendipitous, Pinterest-style feed you can wander through.</p>
+                <ul class="space-y-1.5 text-[12px] text-zinc-400 list-none">
+                    <li>• <strong class="text-zinc-200">Browse any category</strong> in a masonry feed — alphabetical or shuffled, detailed or minimal.</li>
+                    <li>• <strong class="text-zinc-200">Explore the category tree</strong> with the sitemap button: see subcategories to a chosen depth and jump between them.</li>
+                    <li>• <strong class="text-zinc-200">Deep shuffle</strong> samples an entire subtree at once — tiles are drawn from the category and all of its subcategories.</li>
+                    <li>• <strong class="text-zinc-200">Adjust tile size</strong> (S/M/L) to go from a dense thumbnail wall to big previews.</li>
+                    <li>• <strong class="text-zinc-200">Share what you see</strong> — the URL captures your category, trail, and settings, so any link opens the exact same view.</li>
+                </ul>
+                <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
+                    <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
+                    <span>v1.10</span>
+                    <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
+                    <span>Hosted on Toolforge</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <header class="sticky top-0 z-50 bg-black/95 backdrop-blur-md border-b border-zinc-800 p-4 shadow-2xl">
         <div class="max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-center gap-4 px-4">
             <h1 class="text-xl font-bold text-white tracking-tighter uppercase italic">
@@ -76,6 +106,11 @@
                 </div>
 
                 <div class="flex gap-2">
+                    <button id="about-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="About CommonsVibe">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </button>
                     <button id="tree-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Browse Category Tree">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v4m0 0H6v6m6-6h6v6M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6z" />

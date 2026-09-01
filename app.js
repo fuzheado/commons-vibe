@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.9)
+/* CommonsVibe — vanilla JS engine (v1.10)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -24,7 +24,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.9 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.10 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -1384,6 +1384,13 @@ async function init() {
   $("tree-close").addEventListener("click", closeTreeModal);
   $("tree-depth").addEventListener("change", handleDepthChange);
   $("tree-deep-btn").addEventListener("click", handleTreeDeep);
+  $("about-btn").addEventListener("click", () => {
+    $("about-modal").classList.remove("hidden");
+  });
+  $("about-close").addEventListener("click", () => $("about-modal").classList.add("hidden"));
+  $("about-modal").addEventListener("click", (e) => {
+    if (e.target === $("about-modal")) $("about-modal").classList.add("hidden");
+  });
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
   for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
