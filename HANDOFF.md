@@ -40,7 +40,13 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l[&deep=1][&tree=1&depth=N]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&path=<trail>[&deep=1][&tree=1&depth=N]`.
+  `path=` is the breadcrumb trail: segments are URI-encoded (category names may
+  contain `/` — it becomes `%2F`) and joined with `/`; written only once the trail
+  has 2+ segments (plain `?cat=X` links stay clean). Category navigation
+  (`navigateTo`) **pushState**s — browser Back/Forward walks the trail via the
+  popstate handler, which re-syncs all state from the URL. Toggles still
+  `replaceState`.
   Written with `history.replaceState` on every state change; the logo (`href="/"`) is the
   reset. `size=` picks tile density (S/M/L header toggle; `m` = classic 1–4 columns).
   `deep=1` implies shuffle (deep sampling uses the search API); the "Deep ✓" chip in the
@@ -87,6 +93,11 @@ python3 -m http.server 8123        # any static server works; no build step
     re-fetches), `size=` in URL round-trips. Resize the window across the 640/
     1024/1280 breakpoints — card count must never change (the pre-v1.8 resize
     bug). Works in minimal mode too.
+15. Breadcrumb trail: descend via chip/pill/tree/search → `path=` grows in URL,
+    `#crumbs` row shows `A › B › current`; clicking a crumb truncates; browser
+    Back/Forward walks the trail (state re-syncs, tiles reload); sharing a URL
+    with `path=` boots with the trail intact; an empty category shows "End of
+    Collection" instead of an error.
 
 ## Deploy to Toolforge
 
@@ -168,6 +179,31 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   debounced window resize — this also fixed the old bug where shrinking the
   viewport made cards vanish (hidden `col-2`/`col-3` divs).
 - Columns are created dynamically; the old hardcoded `#col-0..3` divs are gone.
+
+### Breadcrumb trail (v1.9)
+
+Categories are a DAG (many parents), so "the path you came through" is user
+history, not graph structure — it's stored as explicit shareable state:
+
+- `state.path` — trail of category titles, current category last. Every
+  navigation funnels through `navigateTo()`, whose rule is: **target already on
+  the trail → truncate to it; otherwise append** (capped at 12 segments).
+- `encodePath()` / `decodePath()` — per-segment URI-encoding keeps names
+  containing `/` unambiguous.
+- `writeURL("push"|"replace")` — single URL writer; navigation pushes, everything
+  else replaces.
+- `renderCrumbs()` — the `#crumbs` row above the grid (`A › B › current`); crumbs
+  navigate (truncating), the current category is non-interactive text.
+- Chip delegation covers `#treebar, #tree-content, #crumbs`.
+- All entry points (tile pills, search, dropdown, treebar/tree/crumb chips) route
+  through `navigateTo`, so the trail is consistent no matter how you descend.
+
+**Bug fixed while testing:** categories with zero direct files return
+`{batchcomplete:true}` with no `query` node from `generator=categorymembers` —
+`data.query.pages` crashed (pre-existing, exposed by back-to-root tests). Both
+generator paths now guard `(data.query && data.query.pages)`. Also `api()` now
+throws "API retries exhausted" instead of returning undefined after four
+429/5xx retries (the final-attempt `continue` skipped the throw).
 
 ### Deep shuffle algorithm (v1.7)
 

@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.8)
+/* CommonsVibe — vanilla JS engine (v1.9)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -24,7 +24,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.8 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.9 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -39,6 +39,7 @@ const state = {
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
+  path: [],                      // breadcrumb trail, current category last (URL param path=)
   items: [],                     // placed cards in fetch order (reflow source)
   colCount: 0,                   // live column count
   colHeights: [],                // tracked column heights for shortest-col place
@@ -194,6 +195,9 @@ async function api(params, { ttl = 0 } = {}) {
       await sleep(1000 * 2 ** attempt);
     }
   }
+  // Exhausted all attempts on retryable errors (429/5xx) — throw instead of
+  // falling through with undefined (fetchBatch would crash on data.query).
+  throw new Error("API retries exhausted");
 }
 
 /* ---------------- config persistence ---------------- */
@@ -238,7 +242,20 @@ async function fetchCategoryInfo() {
   }
 }
 
-function updateURL() {
+// Breadcrumb trail segments are stored WITHOUT the Category: prefix and each
+// segment is URI-encoded before joining with "/" — category names may legally
+// contain "/", which becomes %2F and stays unambiguous.
+function encodePath(pathArr) {
+  return pathArr.map((c) => encodeURIComponent(c.replace(/^Category:/, ""))).join("/");
+}
+
+function decodePath(str) {
+  return str.split("/")
+    .filter(Boolean)
+    .map((s) => "Category:" + decodeURIComponent(s));
+}
+
+function writeURL(mode) {
   const params = new URLSearchParams({
     cat: state.currentCategory,
     sort: state.sortShuffle ? "shuffle" : "alpha",
@@ -246,11 +263,20 @@ function updateURL() {
   });
   if (state.deepMode) params.set("deep", "1");
   params.set("size", state.size);
+  if (state.path.length > 1) params.set("path", encodePath(state.path));
   if (state.treeOpen) {
     params.set("tree", "1");
     params.set("depth", String(state.treeDepth));
   }
-  history.replaceState(null, "", "?" + params.toString());
+  const qs = "?" + params.toString();
+  // Toggles replace (view state); category navigation pushes (Back walks the
+  // descent path — see popstate in init).
+  if (mode === "push") history.pushState(null, "", qs);
+  else history.replaceState(null, "", qs);
+}
+
+function updateURL() {
+  writeURL("replace");
 }
 
 function rebuildDropdown() {
@@ -471,7 +497,7 @@ async function fetchBatch() {
         viprop: "url|derivatives",
         iiurlwidth: "600",
       });
-      pages = info.query.pages || [];
+      pages = (info.query && info.query.pages) || [];
       shuffle(pages);
     }
     return { pages, hasEnded: pages.length === 0 };
@@ -494,7 +520,7 @@ async function fetchBatch() {
   if (state.continueToken) Object.assign(params, state.continueToken);
   const data = await api(params, { ttl: 24 * 3600e3 });
   state.continueToken = data.continue || null;
-  const pages = data.query.pages || [];
+  const pages = (data.query && data.query.pages) || [];
   return { pages, hasEnded: !state.continueToken };
 }
 
@@ -803,11 +829,7 @@ function buildCard(page) {
     pill.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const targetCat = pill.getAttribute("data-cat");
-      state.currentCategory = targetCat;
-      addCategoryToConfig(targetCat);
-      rebuildDropdown();
-      resetAndFetch();
+      navigateTo(pill.getAttribute("data-cat"));
     });
   }
   return card;
@@ -824,6 +846,40 @@ function treeChipHTML(catTitle, { hidden = false, count = null } = {}) {
     : "bg-zinc-800 text-zinc-300 hover:bg-blue-600 hover:text-white";
   const badge = count === null ? "" : ` <span class="text-zinc-500">${count.toLocaleString("en-US")}</span>`;
   return `<button class="cat-pill px-2 py-1 rounded-full text-[9px] font-bold whitespace-nowrap transition-colors ${cls}" data-cat="${esc(catTitle)}" title="${esc(catTitle)}">${esc(catDisplayName(catTitle))}${badge}</button>`;
+}
+
+// Breadcrumb trail chips: clickable crumbs truncate the path (navigateTo rule);
+// the current category renders as non-interactive text.
+function renderCrumbs() {
+  const el = $("crumbs");
+  el.innerHTML = "";
+  if (state.path.length < 2) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  state.path.forEach((cat, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "text-zinc-600 font-bold";
+      sep.textContent = "›";
+      el.appendChild(sep);
+    }
+    if (i === state.path.length - 1) {
+      const cur = document.createElement("span");
+      cur.className = "text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[280px]";
+      cur.textContent = catDisplayName(cat);
+      cur.title = cat;
+      el.appendChild(cur);
+    } else {
+      const b = document.createElement("button");
+      b.className = "cat-pill px-2 py-1 rounded-full text-[9px] font-bold bg-zinc-800 text-zinc-300 hover:bg-blue-600 hover:text-white transition-colors max-w-[220px] truncate";
+      b.setAttribute("data-cat", cat);
+      b.textContent = catDisplayName(cat);
+      b.title = cat;
+      el.appendChild(b);
+    }
+  });
 }
 
 async function fetchTreebar() {
@@ -870,11 +926,25 @@ async function fetchTreebar() {
   }).catch((e) => console.warn("treebar subcats failed:", e));
 }
 
+// The one chokepoint for category navigation (tile pills, treebar chips, tree
+// modal, dropdown, search). Maintains the breadcrumb trail: descend, or
+// truncate back when the target is already on the path.
 function navigateTo(catTitle) {
+  if (normCat(catTitle) === normCat(state.currentCategory)) return;
+  const idx = state.path.findIndex((c) => normCat(c) === normCat(catTitle));
+  if (idx >= 0) {
+    state.path = state.path.slice(0, idx + 1);
+  } else {
+    if (!state.path.length) state.path = [state.currentCategory];
+    state.path.push(catTitle);
+    if (state.path.length > 12) state.path.shift(); // URL-length guard
+  }
   state.currentCategory = catTitle;
   addCategoryToConfig(catTitle);
+  state.treeOpen = false;
+  $("tree-modal").classList.add("hidden");
   rebuildDropdown();
-  closeTreeModal();
+  writeURL("push");
   resetAndFetch();
 }
 
@@ -1107,6 +1177,7 @@ function resetAndFetch() {
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
+  renderCrumbs();
   fetchImages();
 }
 
@@ -1128,12 +1199,8 @@ async function handleSearch(e) {
     const data = await api({ action: "query", titles: val }, { ttl: 7 * 24 * 3600e3 });
     const page = (data.query.pages || [])[0];
     if (page && !page.missing) {
-      const official = page.title;
-      addCategoryToConfig(official);
-      state.currentCategory = official;
       input.value = "";
-      rebuildDropdown();
-      resetAndFetch();
+      navigateTo(page.title);
     } else {
       window.alert(`Category not found: ${val}`);
     }
@@ -1225,8 +1292,7 @@ async function handleModalSave() {
 }
 
 function handleSelectChange(e) {
-  state.currentCategory = e.target.value;
-  resetAndFetch();
+  navigateTo(e.target.value);
 }
 
 function handleSortToggle() {
@@ -1298,6 +1364,12 @@ async function init() {
   const urlSize = params.get("size");
   if (SIZE_COLS[urlSize]) state.size = urlSize;
   syncSizeUI();
+  const urlPath = params.get("path");
+  if (urlPath) {
+    state.path = decodePath(urlPath);
+    // The trail's last segment wins as the current category.
+    if (state.path.length) state.currentCategory = state.path[state.path.length - 1];
+  }
 
   rebuildDropdown();
   $("search-input").addEventListener("keydown", handleSearch);
@@ -1318,14 +1390,53 @@ async function init() {
     btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
   }
   window.addEventListener("resize", handleResize);
-  // Chip navigation (treebar chips + tree rows) via delegation.
+  // Chip navigation (treebar chips + tree rows + crumbs) via delegation.
   document.body.addEventListener("click", (e) => {
     const chip = e.target.closest("[data-cat]");
     if (!chip) return;
-    const inTreeModal = chip.closest("#tree-content, #treebar");
+    const inTreeModal = chip.closest("#tree-content, #treebar, #crumbs");
     if (!inTreeModal) return;
     e.preventDefault();
     navigateTo(chip.getAttribute("data-cat"));
+  });
+
+  // Browser Back/Forward walks the breadcrumb trail: re-sync all state from
+  // the URL and refetch (no push — history already moved).
+  window.addEventListener("popstate", () => {
+    const p2 = new URLSearchParams(location.search);
+    const cat = p2.get("cat");
+    if (!cat) return;
+    const p = p2.get("path");
+    state.path = p ? decodePath(p) : [];
+    if (!state.path.some((c) => normCat(c) === normCat(cat))) state.path = state.path.length ? [] : state.path;
+    state.currentCategory = cat;
+    addCategoryToConfig(cat);
+    state.sortShuffle = p2.get("sort") === "shuffle";
+    state.deepMode = p2.get("deep") === "1";
+    if (state.deepMode) state.sortShuffle = true;
+    syncSortUI();
+    syncDeepUI();
+    state.minimalView = p2.get("view") === "min";
+    $("masonry-container").classList.toggle("minimal-mode", state.minimalView);
+    if (state.minimalView) {
+      $("view-knob").style.transform = "translateX(-20px)";
+      $("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800");
+    } else {
+      $("view-knob").style.transform = "translateX(0px)";
+      $("view-toggle").classList.replace("bg-zinc-800", "bg-blue-600");
+    }
+    const s2 = p2.get("size");
+    if (SIZE_COLS[s2]) state.size = s2;
+    syncSizeUI();
+    const d2 = parseInt(p2.get("depth"), 10);
+    if (d2 >= 1 && d2 <= 5) {
+      state.treeDepth = d2;
+      $("tree-depth").value = String(d2);
+    }
+    state.treeOpen = false;
+    $("tree-modal").classList.add("hidden");
+    rebuildDropdown();
+    resetAndFetch();
   });
 
   const observer = new IntersectionObserver(
