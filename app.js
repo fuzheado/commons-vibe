@@ -1399,6 +1399,7 @@ function resetAndFetch() {
   ensureColumns(currentCols());
   if (state.list) state.list.cursor = 0;
   $("sort-pill").classList.toggle("hidden", !!state.list); // Alpha/Shuffle N/A for lists
+  syncDeepUI(); // banner text tracks the new category when deep stays on
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
