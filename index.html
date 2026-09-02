@@ -31,6 +31,64 @@
         </div>
     </div>
 
+    <div id="tree-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-3xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-6 pb-2">
+                <h2 class="text-lg font-bold text-white uppercase tracking-tighter italic">Category <span class="text-blue-500">Tree</span></h2>
+                <button id="tree-close" class="p-1 text-zinc-500 hover:text-white transition-colors" title="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="px-6 pb-2 flex flex-wrap items-center gap-3">
+                <label class="text-[10px] uppercase tracking-widest text-zinc-500 font-bold flex items-center gap-2">Depth
+                    <select id="tree-depth" class="bg-zinc-900 text-[10px] font-bold tracking-widest text-zinc-300 border border-zinc-800 rounded-lg px-2 py-1.5 outline-none focus:border-blue-600">
+                        <option value="1">1</option>
+                        <option value="2" selected>2</option>
+                        <option value="3">3</option>
+                        <option value="4">4</option>
+                        <option value="5">5</option>
+                    </select>
+                </label>
+                <button id="tree-deep-btn" class="text-[9px] font-black uppercase tracking-widest bg-purple-600 hover:bg-purple-500 text-white rounded-lg px-3 py-1.5 transition-colors" title="Shuffle the feed across this category and all its subcategories (CirrusSearch depth cap ~5)">Shuffle Entire Subtree</button>
+                <span id="tree-status" class="text-[10px] font-mono text-blue-500 font-black"></span>
+            </div>
+            <p class="px-6 pb-1 text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Deep shuffle draws tiles from every subcategory below — a Deep chip appears in the header while it's on.</p>
+            <div id="tree-content" class="px-4 pb-6 pt-2 overflow-y-auto flex-1 text-sm"></div>
+        </div>
+    </div>
+
+    <div id="about-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
+            <div class="flex justify-between items-center p-6 pb-2">
+                <h2 class="text-lg font-bold text-white uppercase tracking-tighter italic">About <span class="text-blue-500">CommonsVibe</span></h2>
+                <button id="about-close" class="p-1 text-zinc-500 hover:text-white transition-colors" title="Close">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="px-6 pb-6 pt-2 overflow-y-auto text-sm text-zinc-300 space-y-4">
+                <p><strong class="text-white">CommonsVibe</strong> is a visual explorer for <a href="https://commons.wikimedia.org/" target="_blank" class="text-blue-400 hover:underline">Wikimedia Commons</a> — a collection of over 100 million freely licensed images, videos, and sounds. Commons was built as a file warehouse; this tool turns it into a serendipitous, Pinterest-style feed you can wander through.</p>
+                <ul class="space-y-1.5 text-[12px] text-zinc-400 list-none">
+                    <li>• <strong class="text-zinc-200">Browse any category</strong> in a masonry feed — alphabetical or shuffled, detailed or minimal.</li>
+                    <li>• <strong class="text-zinc-200">Explore the category tree</strong> with the sitemap button: see subcategories to a chosen depth and jump between them.</li>
+                    <li>• <strong class="text-zinc-200">Deep shuffle</strong> samples an entire subtree at once — tiles are drawn from the category and all of its subcategories.</li>
+                    <li>• <strong class="text-zinc-200">Adjust tile size</strong> (S/M/L) to go from a dense thumbnail wall to big previews.</li>
+                    <li>• <strong class="text-zinc-200">Share what you see</strong> — the URL captures your category, trail, and settings, so any link opens the exact same view.</li>
+                </ul>
+                <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
+                <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
+                    <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
+                    <span>v1.10</span>
+                    <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
+                    <span>Hosted on Toolforge</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <header class="sticky top-0 z-50 bg-black/95 backdrop-blur-md border-b border-zinc-800 p-4 shadow-2xl">
         <div class="max-w-7xl mx-auto flex flex-col lg:flex-row justify-between items-center gap-4 px-4">
             <h1 class="text-xl font-bold text-white tracking-tighter uppercase italic">
@@ -48,20 +106,36 @@
                 </div>
 
                 <div class="flex gap-2">
+                    <button id="tree-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Browse Category Tree">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v4m0 0H6v6m6-6h6v6M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6z" />
+                        </svg>
+                    </button>
                     <button id="edit-list-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Edit List">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
                         </svg>
                     </button>
+                    <button id="about-btn" class="ml-3 p-2 bg-zinc-900 hover:bg-zinc-700 rounded-lg text-zinc-600 hover:text-white transition-all" title="About CommonsVibe">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                        </svg>
+                    </button>
                 </div>
 
                 <div class="flex gap-4 border-l border-zinc-800 pl-4">
+                    <div id="size-toggle" class="flex items-center gap-1 bg-zinc-900/50 p-1 px-2 rounded-full border border-zinc-800" title="Tile size">
+                        <button data-size="s" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">S</button>
+                        <button data-size="m" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">M</button>
+                        <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">L</button>
+                    </div>
                     <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
                         <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Alpha</span>
                         <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner">
                             <div id="sort-knob" class="absolute top-1 left-1 w-3 h-3 bg-white rounded-full toggle-transition"></div>
                         </button>
                         <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Shuffle</span>
+                        <button id="deep-chip" class="hidden text-[9px] font-black uppercase tracking-widest bg-purple-600 hover:bg-purple-500 text-white rounded-full px-2.5 py-1 transition-colors shadow" title="Deep shuffle is ON — the feed samples this category and all its subcategories. Click to turn off.">Deep ✓</button>
                         <button id="refresh-btn" class="p-1.5 bg-zinc-800 hover:bg-blue-600 rounded-full text-zinc-400 hover:text-white transition-all shadow-lg group" title="Re-shuffle / Refresh">
                             <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
@@ -81,12 +155,20 @@
     </header>
 
     <main class="max-w-7xl mx-auto p-4 md:p-8">
-        <div id="masonry-container" class="masonry-container flex flex-row gap-6 items-start">
-            <div id="col-0" class="masonry-col flex flex-col gap-6"></div>
-            <div id="col-1" class="masonry-col hidden sm:flex flex-col gap-6"></div>
-            <div id="col-2" class="masonry-col hidden lg:flex flex-col gap-6"></div>
-            <div id="col-3" class="masonry-col hidden xl:flex flex-col gap-6"></div>
+        <div id="crumbs" class="hidden mb-4 flex flex-wrap items-center gap-1.5"></div>
+        <div id="deep-banner" class="hidden mb-4 flex items-center justify-between gap-4 bg-purple-950/40 border border-purple-800/60 rounded-xl px-4 py-2.5">
+            <p class="text-[10px] text-purple-300 font-bold uppercase tracking-widest">🌳 Deep shuffle — sampling <span id="deep-banner-cat" class="text-white"></span> and all its subcategories</p>
+            <button id="deep-banner-off" class="text-[9px] font-black uppercase tracking-widest text-purple-400 hover:text-white border border-purple-700 hover:border-purple-400 rounded-lg px-3 py-1.5 transition-colors shrink-0" title="Return to plain shuffle (this category only)">Turn Off</button>
         </div>
+        <div id="treebar" class="hidden mb-6 flex flex-col gap-2">
+            <div class="flex flex-wrap items-center gap-2">
+                <span id="treebar-parents" class="flex flex-wrap items-center gap-2"></span>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <span id="treebar-subs" class="flex flex-wrap items-center gap-2"></span>
+            </div>
+        </div>
+        <div id="masonry-container" class="masonry-container flex flex-row gap-6 items-start"></div>
         <div id="bottom-status" class="py-20 text-center">
             <div id="loading-spinner" class="animate-spin rounded-full h-6 w-6 border-t-2 border-blue-500 mx-auto"></div>
             <h2 id="end-message" class="hidden text-sm text-zinc-600 uppercase tracking-widest mt-4 font-bold">End of Collection</h2>

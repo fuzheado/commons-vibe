@@ -1,4 +1,9 @@
-/* CommonsVibe — vanilla JS engine (v1.5)
+/* CommonsVibe — vanilla JS engine (v1.10)
+ * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
+ * (parent + subcategory chips with file counts), deep mode (shuffle the whole
+ * subtree via CirrusSearch deepcategory, URL param deep=1).
+ * Tile size control (v1.8): S/M/L density, shortest-column placement, full
+ * reflow on size change and window resize. URL param size=s|m|l.
  * Replaces the PyScript/Pyodide runtime (2026.1.1).
  * Same public URL contract: ?cat=<Category>&sort=alpha|shuffle&view=det|min
  * Same localStorage key: vibe_config
@@ -19,7 +24,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.5 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.10 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -29,8 +34,16 @@ const state = {
   continueToken: null,           // alpha-mode paging token
   isLoading: false,
   hasReachedEnd: false,
-  colIdx: 0,
   seenTitles: new Set(),         // shuffle-mode dedupe within a session
+  deepMode: false,               // shuffle across the whole subcategory tree
+  treeOpen: false,               // tree modal visibility (URL param tree=1)
+  treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
+  size: "m",                     // tile density s|m|l (URL param size=)
+  path: [],                      // breadcrumb trail, current category last (URL param path=)
+  items: [],                     // placed cards in fetch order (reflow source)
+  colCount: 0,                   // live column count
+  colHeights: [],                // tracked column heights for shortest-col place
+  deepWalk: null,                // in-flight/resolved subtree walk (deep mode)
   requestId: 0,                  // stale-response guard
   abort: new AbortController(),
 };
@@ -134,7 +147,23 @@ function cachePut(url, body) {
 /**
  * Call the Commons Action API. `ttl` (ms) > 0 enables caching for this call.
  * Retries 429/5xx/network errors with exponential backoff.
+ * All fetches pass through a global throttle (>= API_GAP_MS between request
+ * starts) — bursts of parallel tree/cache calls otherwise trip HTTP 429.
  */
+const API_GAP_MS = 150;
+let lastApiStart = 0;
+let apiChain = Promise.resolve();
+function apiThrottle() {
+  const slot = apiChain.then(async () => {
+    const now = Date.now();
+    const wait = lastApiStart + API_GAP_MS - now;
+    if (wait > 0) await sleep(wait);
+    lastApiStart = Date.now();
+  });
+  apiChain = slot.catch(() => {});
+  return slot;
+}
+
 async function api(params, { ttl = 0 } = {}) {
   params = { ...params, format: "json", formatversion: "2", origin: "*" };
   const url = API_BASE + "?" + new URLSearchParams(params).toString();
@@ -146,6 +175,8 @@ async function api(params, { ttl = 0 } = {}) {
   for (let attempt = 0; attempt < 4; attempt++) {
     if (signal.aborted) throw new DOMException("Aborted", "AbortError");
     try {
+      await apiThrottle();
+      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
       const resp = await fetch(url, { signal });
       if (resp.status === 429 || resp.status >= 500) {
         const retryAfter = parseInt(resp.headers.get("retry-after") || "0", 10);
@@ -164,6 +195,9 @@ async function api(params, { ttl = 0 } = {}) {
       await sleep(1000 * 2 ** attempt);
     }
   }
+  // Exhausted all attempts on retryable errors (429/5xx) — throw instead of
+  // falling through with undefined (fetchBatch would crash on data.query).
+  throw new Error("API retries exhausted");
 }
 
 /* ---------------- config persistence ---------------- */
@@ -208,13 +242,41 @@ async function fetchCategoryInfo() {
   }
 }
 
-function updateURL() {
+// Breadcrumb trail segments are stored WITHOUT the Category: prefix and each
+// segment is URI-encoded before joining with "/" — category names may legally
+// contain "/", which becomes %2F and stays unambiguous.
+function encodePath(pathArr) {
+  return pathArr.map((c) => encodeURIComponent(c.replace(/^Category:/, ""))).join("/");
+}
+
+function decodePath(str) {
+  return str.split("/")
+    .filter(Boolean)
+    .map((s) => "Category:" + decodeURIComponent(s));
+}
+
+function writeURL(mode) {
   const params = new URLSearchParams({
     cat: state.currentCategory,
     sort: state.sortShuffle ? "shuffle" : "alpha",
     view: state.minimalView ? "min" : "det",
   });
-  history.replaceState(null, "", "?" + params.toString());
+  if (state.deepMode) params.set("deep", "1");
+  params.set("size", state.size);
+  if (state.path.length > 1) params.set("path", encodePath(state.path));
+  if (state.treeOpen) {
+    params.set("tree", "1");
+    params.set("depth", String(state.treeDepth));
+  }
+  const qs = "?" + params.toString();
+  // Toggles replace (view state); category navigation pushes (Back walks the
+  // descent path — see popstate in init).
+  if (mode === "push") history.pushState(null, "", qs);
+  else history.replaceState(null, "", qs);
+}
+
+function updateURL() {
+  writeURL("replace");
 }
 
 function rebuildDropdown() {
@@ -248,29 +310,181 @@ function rebuildDropdown() {
   }
 }
 
+/* ---------------- category tree helpers ---------------- */
+
+// Batched categoryinfo (files + subcats counts) — max 50 titles per call.
+async function getCatInfo(titles) {
+  const map = new Map();
+  const chunks = [];
+  for (let i = 0; i < titles.length; i += 50) chunks.push(titles.slice(i, i + 50));
+  await Promise.all(chunks.map(async (chunk) => {
+    const data = await api(
+      { action: "query", titles: chunk.join("|"), prop: "categoryinfo" },
+      { ttl: 7 * 24 * 3600e3 },
+    );
+    for (const p of data.query.pages || []) {
+      const v = p.categoryinfo
+        ? { files: p.categoryinfo.files || 0, subcats: p.categoryinfo.subcats || 0 }
+        : { files: 0, subcats: 0 };
+      // Key by normalized title — callers may pass underscore variants.
+      map.set(normCat(p.title), v);
+      map.set(p.title, v);
+    }
+  }));
+  return map;
+}
+
+// Parent categories of one category (ns=14 only; hidden parents flagged).
+async function fetchParents(catTitle) {
+  const data = await api(
+    { action: "query", titles: catTitle, prop: "categories", clnamespace: "14", cllimit: "max", clprop: "hidden" },
+    { ttl: 24 * 3600e3 },
+  );
+  const page = (data.query.pages || [])[0];
+  return (page && page.categories) || [];
+}
+
+// Immediate subcategories of one category, with file/subcat counts.
+async function buildTreeLevel(catTitle) {
+  const data = await api(
+    { action: "query", list: "categorymembers", cmtitle: catTitle, cmtype: "subcat", cmlimit: "max" },
+    { ttl: 24 * 3600e3 },
+  );
+  const titles = ((data.query && data.query.categorymembers) || []).map((m) => m.title);
+  if (!titles.length) return [];
+  const info = await getCatInfo(titles);
+  return titles.map((t) => ({ title: t, ...(info.get(normCat(t)) || { files: 0, subcats: 0 }) }));
+}
+
+const catDisplayName = (t) => t.replace("Category:", "").replaceAll("_", " ");
+
 /* ---------------- batch fetching (alpha + shuffle) ---------------- */
 
-async function fetchBatch() {
-  if (state.sortShuffle) {
-    // Shuffle: CirrusSearch random + one batched info call. Never cached (serendipity).
+// Pull up to `limit` unseen titles from search results, marking them seen.
+function pickNewTitles(results, limit = 12) {
+  const titles = [];
+  for (const r of results) {
+    if (!state.seenTitles.has(r.title)) {
+      state.seenTitles.add(r.title);
+      titles.push(r.title);
+    }
+    if (titles.length >= limit) break;
+  }
+  return titles;
+}
+
+// Random draw from a single category — exact (no caps, no depth expansion).
+async function flatSampleTitles() {
+  const catName = state.currentCategory.replace(/^Category:/, "").replace(/_/g, " ");
+  const search = await api({
+    action: "query",
+    list: "search",
+    srsearch: `incategory:"${catName}"`,
+    srnamespace: "6",
+    srlimit: "50",
+    srsort: "random",
+  });
+  return pickNewTitles((search.query && search.query.search) || []);
+}
+
+// Bounded-concurrency map (the API etiquette: no stampedes of parallel calls).
+async function mapLimit(items, limit, fn) {
+  const results = new Array(items.length);
+  let i = 0;
+  async function worker() {
+    while (i < items.length) {
+      const idx = i++;
+      results[idx] = await fn(items[idx], idx);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+// Deep-shuffle walk bounds. deepcategory:'X' silently truncates at depth 5 and
+// category caps (T246568), so we walk the subtree ourselves instead. Benchmark
+// (benchmark/deep-shuffle.js): on a 401-category tree a 200-node cap hid 32% of
+// files — with the 120ms throttle a 500-node walk is safe, just slow cold.
+const DEEP_WALK_DEPTH = 5;
+const DEEP_WALK_MAX_NODES = 500;
+
+// Enumerate the subtree, returning [{title, files}] (files = direct file count).
+async function collectSubtree(rootCat, { depth = DEEP_WALK_DEPTH, maxNodes = DEEP_WALK_MAX_NODES } = {}) {
+  const pool = [{ title: rootCat, files: 0 }];
+  try {
+    const info = await getCatInfo([rootCat]);
+    pool[0].files = (info.get(normCat(rootCat)) || {}).files || 0;
+  } catch { /* weight 0 for root */ }
+  const seen = new Set([normCat(rootCat)]); // the category graph is a DAG with cycles
+  let frontier = [rootCat];
+  for (let level = 0; level < depth && frontier.length && pool.length < maxNodes; level++) {
+    const levels = await mapLimit(frontier, 4, (c) => buildTreeLevel(c).catch(() => []));
+    const next = [];
+    for (const rows of levels) {
+      for (const row of rows) {
+        if (seen.has(normCat(row.title))) continue;
+        seen.add(normCat(row.title));
+        pool.push({ title: row.title, files: row.files });
+        next.push(row.title);
+        if (pool.length >= maxNodes) break;
+      }
+      if (pool.length >= maxNodes) break;
+    }
+    frontier = next;
+  }
+  return pool;
+}
+
+// Deep shuffle: pick one category uniformly at random weighted by its direct
+// file count (files in many categories get multiple tickets — uniform over
+// categories, not perfectly over files — but covers the full-depth tree with
+// exact per-category draws, unlike the truncating deepcategory: envelope).
+async function deepSampleTitles() {
+  const fallbackDraw = async () => {
     const catName = state.currentCategory.replace(/^Category:/, "").replace(/_/g, " ");
     const search = await api({
       action: "query",
       list: "search",
-      srsearch: `incategory:"${catName}"`,
+      srsearch: `deepcategory:"${catName}"`,
       srnamespace: "6",
-      srlimit: "24",
+      srlimit: "50",
       srsort: "random",
     });
-    const results = (search.query && search.query.search) || [];
-    const titles = [];
-    for (const r of results) {
-      if (!state.seenTitles.has(r.title)) {
-        state.seenTitles.add(r.title);
-        titles.push(r.title);
-      }
-      if (titles.length >= 12) break;
-    }
+    return pickNewTitles((search.query && search.query.search) || []);
+  };
+
+  // Walk once per category (cached API calls make re-walks cheap). While the
+  // walk is still running, batches fall back to a deepcategory draw so the
+  // grid never stalls; once it lands, batches switch to the exact sampler.
+  if (!state.deepWalk) {
+    state.deepWalk = collectSubtree(state.currentCategory).catch(() => null);
+  }
+  const pool = await Promise.race([state.deepWalk, sleep(800).then(() => null)]);
+  if (!pool) return fallbackDraw();
+  const total = pool.reduce((s, n) => s + n.files, 0);
+  if (!total) return fallbackDraw(); // no direct files anywhere in the envelope
+  let r = Math.random() * total;
+  let pick = pool[pool.length - 1];
+  for (const node of pool) {
+    r -= node.files;
+    if (r <= 0) { pick = node; break; }
+  }
+  const catName = pick.title.replace(/^Category:/, "").replace(/_/g, " ");
+  const search = await api({
+    action: "query",
+    list: "search",
+    srsearch: `incategory:"${catName}"`,
+    srnamespace: "6",
+    srlimit: "50",
+    srsort: "random",
+  });
+  return pickNewTitles((search.query && search.query.search) || []);
+}
+
+async function fetchBatch() {
+  if (state.sortShuffle) {
+    // Shuffle: random draw + one batched info call. Never cached (serendipity).
+    const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
     let pages = [];
     if (titles.length) {
       const info = await api({
@@ -283,7 +497,7 @@ async function fetchBatch() {
         viprop: "url|derivatives",
         iiurlwidth: "600",
       });
-      pages = info.query.pages || [];
+      pages = (info.query && info.query.pages) || [];
       shuffle(pages);
     }
     return { pages, hasEnded: pages.length === 0 };
@@ -306,7 +520,7 @@ async function fetchBatch() {
   if (state.continueToken) Object.assign(params, state.continueToken);
   const data = await api(params, { ttl: 24 * 3600e3 });
   state.continueToken = data.continue || null;
-  const pages = data.query.pages || [];
+  const pages = (data.query && data.query.pages) || [];
   return { pages, hasEnded: !state.continueToken };
 }
 
@@ -366,16 +580,97 @@ function srcsetFor(thumbUrl) {
   return `${thumbUrl} 1x, ${retina} 2x`;
 }
 
+/* ---------------- tile layout (size setting + reflow) ---------------- */
+
+// Column counts per density setting, indexed by breakpoint tier
+// (0: <640, 1: <1024, 2: <1280, 3: >=1280) — same tiers as the old
+// hidden-column classes. "m" reproduces the pre-v1.8 layout exactly.
+const SIZE_COLS = { s: [2, 3, 4, 6], m: [1, 2, 3, 4], l: [1, 2, 2, 3] };
+const BREAKPOINTS = [640, 1024, 1280];
+
+function breakpointTier() {
+  let t = 0;
+  for (const bp of BREAKPOINTS) if (window.innerWidth >= bp) t++;
+  return t;
+}
+
+function currentCols() {
+  return (SIZE_COLS[state.size] || SIZE_COLS.m)[breakpointTier()];
+}
+
+function ensureColumns(n) {
+  const container = $("masonry-container");
+  if (state.colCount === n && container.children.length === n) return;
+  state.colCount = n;
+  state.colHeights = new Array(n).fill(0);
+  container.innerHTML = "";
+  for (let i = 0; i < n; i++) {
+    const col = document.createElement("div");
+    col.className = "masonry-col flex flex-col gap-6";
+    container.appendChild(col);
+  }
+}
+
+// Place a card in the shortest column using tracked heights. Cards carry their
+// media aspect ratio (style="aspect-ratio"), so offsetHeight is stable even
+// before lazy images load.
+function placeCard(card) {
+  let col = 0;
+  for (let i = 1; i < state.colHeights.length; i++) {
+    if (state.colHeights[i] < state.colHeights[col]) col = i;
+  }
+  const colEl = $("masonry-container").children[col];
+  colEl.appendChild(card);
+  state.colHeights[col] += card.offsetHeight || 0;
+}
+
+// Redistribute all placed cards for the current size/viewport. Moving DOM
+// nodes keeps listeners and loaded images (no re-fetch).
+function reflow() {
+  ensureColumns(currentCols());
+  state.colHeights = new Array(state.colCount).fill(0);
+  const items = state.items;
+  state.items = [];
+  for (const card of items) {
+    state.items.push(card);
+    placeCard(card);
+  }
+}
+
+let resizeTimer = null;
+function handleResize() {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    if (currentCols() !== state.colCount) reflow();
+  }, 150);
+}
+
+function setSize(s) {
+  if (!SIZE_COLS[s] || state.size === s) return;
+  state.size = s;
+  syncSizeUI();
+  updateURL();
+  reflow();
+}
+
+function syncSizeUI() {
+  for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
+    const active = btn.getAttribute("data-size") === state.size;
+    btn.classList.toggle("bg-blue-600", active);
+    btn.classList.toggle("text-white", active);
+    btn.classList.toggle("text-zinc-500", !active);
+    btn.classList.toggle("hover:text-white", !active);
+  }
+}
+
 function renderPages(pages) {
-  const cols = [1, 2, 3, 4][
-    (window.innerWidth >= 640) + (window.innerWidth >= 1024) + (window.innerWidth >= 1280)
-  ];
+  ensureColumns(currentCols());
   for (const page of pages) {
     if (!("imageinfo" in page) && !("videoinfo" in page)) continue;
     const card = buildCard(page);
     if (!card) continue;
-    $("col-" + (state.colIdx % cols)).appendChild(card);
-    state.colIdx++;
+    state.items.push(card);
+    placeCard(card);
   }
 }
 
@@ -534,14 +829,294 @@ function buildCard(page) {
     pill.addEventListener("click", (e) => {
       e.preventDefault();
       e.stopPropagation();
-      const targetCat = pill.getAttribute("data-cat");
-      state.currentCategory = targetCat;
-      addCategoryToConfig(targetCat);
-      rebuildDropdown();
-      resetAndFetch();
+      navigateTo(pill.getAttribute("data-cat"));
     });
   }
   return card;
+}
+
+/* ---------------- tree UI (treebar + tree modal) ---------------- */
+
+const TREE_MAX_NODES = 300;
+let treeReqId = 0; // bumped by resetAndFetch so stale tree renders bail out
+
+function treeChipHTML(catTitle, { hidden = false, count = null } = {}) {
+  const cls = hidden
+    ? "border border-zinc-700 text-zinc-500 hover:text-zinc-300"
+    : "bg-zinc-800 text-zinc-300 hover:bg-blue-600 hover:text-white";
+  const badge = count === null ? "" : ` <span class="text-zinc-500">${count.toLocaleString("en-US")}</span>`;
+  return `<button class="cat-pill px-2 py-1 rounded-full text-[9px] font-bold whitespace-nowrap transition-colors ${cls}" data-cat="${esc(catTitle)}" title="${esc(catTitle)}">${esc(catDisplayName(catTitle))}${badge}</button>`;
+}
+
+// Breadcrumb trail chips: clickable crumbs truncate the path (navigateTo rule);
+// the current category renders as non-interactive text.
+function renderCrumbs() {
+  const el = $("crumbs");
+  el.innerHTML = "";
+  if (state.path.length < 2) {
+    el.classList.add("hidden");
+    return;
+  }
+  el.classList.remove("hidden");
+  state.path.forEach((cat, i) => {
+    if (i > 0) {
+      const sep = document.createElement("span");
+      sep.className = "text-zinc-600 font-bold";
+      sep.textContent = "›";
+      el.appendChild(sep);
+    }
+    if (i === state.path.length - 1) {
+      const cur = document.createElement("span");
+      cur.className = "text-[10px] font-black text-white uppercase tracking-widest truncate max-w-[280px]";
+      cur.textContent = catDisplayName(cat);
+      cur.title = cat;
+      el.appendChild(cur);
+    } else {
+      const b = document.createElement("button");
+      b.className = "cat-pill px-2 py-1 rounded-full text-[9px] font-bold bg-zinc-800 text-zinc-300 hover:bg-blue-600 hover:text-white transition-colors max-w-[220px] truncate";
+      b.setAttribute("data-cat", cat);
+      b.textContent = catDisplayName(cat);
+      b.title = cat;
+      el.appendChild(b);
+    }
+  });
+}
+
+async function fetchTreebar() {
+  const bar = $("treebar");
+  const pEl = $("treebar-parents");
+  const sEl = $("treebar-subs");
+  pEl.innerHTML = "";
+  sEl.innerHTML = "";
+  const cat = state.currentCategory;
+  if (!cat) { bar.classList.add("hidden"); return; }
+  bar.classList.remove("hidden");
+
+  // Parents (breadcrumb up) — independent of subcat fetch.
+  fetchParents(cat).then((parents) => {
+    if (cat !== state.currentCategory) return;
+    if (!parents.length) return;
+    const label = document.createElement("span");
+    label.className = "text-[9px] font-black uppercase tracking-widest text-zinc-600";
+    label.textContent = "↑";
+    pEl.appendChild(label);
+    for (const p of parents) {
+      pEl.insertAdjacentHTML("beforeend", treeChipHTML(p.title, { hidden: "hidden" in p }));
+    }
+  }).catch((e) => console.warn("treebar parents failed:", e));
+
+  // Subcategory chips (first 14 + "more" opens the tree modal).
+  buildTreeLevel(cat).then((rows) => {
+    if (cat !== state.currentCategory) return;
+    if (!rows.length) return;
+    const label = document.createElement("span");
+    label.className = "text-[9px] font-black uppercase tracking-widest text-zinc-600";
+    label.textContent = "↳";
+    sEl.appendChild(label);
+    for (const row of rows.slice(0, 14)) {
+      sEl.insertAdjacentHTML("beforeend", treeChipHTML(row.title, { count: row.files }));
+    }
+    if (rows.length > 14) {
+      const more = document.createElement("button");
+      more.className = "px-2 py-1 rounded-full text-[9px] font-bold bg-blue-700 text-white hover:bg-blue-500 transition-colors";
+      more.textContent = `+${rows.length - 14} more`;
+      more.addEventListener("click", openTreeModal);
+      sEl.appendChild(more);
+    }
+  }).catch((e) => console.warn("treebar subcats failed:", e));
+}
+
+// The one chokepoint for category navigation (tile pills, treebar chips, tree
+// modal, dropdown, search). Maintains the breadcrumb trail: descend, or
+// truncate back when the target is already on the path.
+function navigateTo(catTitle) {
+  if (normCat(catTitle) === normCat(state.currentCategory)) return;
+  const idx = state.path.findIndex((c) => normCat(c) === normCat(catTitle));
+  if (idx >= 0) {
+    state.path = state.path.slice(0, idx + 1);
+  } else {
+    if (!state.path.length) state.path = [state.currentCategory];
+    state.path.push(catTitle);
+    if (state.path.length > 12) state.path.shift(); // URL-length guard
+  }
+  state.currentCategory = catTitle;
+  addCategoryToConfig(catTitle);
+  state.treeOpen = false;
+  $("tree-modal").classList.add("hidden");
+  rebuildDropdown();
+  writeURL("push");
+  resetAndFetch();
+}
+
+// --- tree modal ---
+
+function closeTreeModal() {
+  state.treeOpen = false;
+  $("tree-modal").classList.add("hidden");
+  updateURL();
+}
+
+async function openTreeModal() {
+  state.treeOpen = true;
+  $("tree-depth").value = String(state.treeDepth);
+  $("tree-modal").classList.remove("hidden");
+  updateURL();
+  loadTree();
+}
+
+function handleDepthChange() {
+  state.treeDepth = parseInt($("tree-depth").value, 10) || 2;
+  loadTree();
+  updateURL();
+}
+
+async function loadTree() {
+  const reqId = ++treeReqId;
+  const depth = parseInt($("tree-depth").value, 10) || 2;
+  const rootCat = state.currentCategory;
+  const content = $("tree-content");
+  content.innerHTML = "";
+  $("tree-status").textContent = "Loading…";
+  if (!rootCat) { $("tree-status").textContent = ""; return; }
+
+  const ctx = { reqId, nodes: 0, truncated: false };
+
+  // Root header row (clickable to navigate; counts from categoryinfo).
+  const rootEl = document.createElement("div");
+  rootEl.className = "mb-2 pb-2 border-b border-zinc-800";
+  try {
+    const info = await getCatInfo([rootCat]);
+    if (reqId !== treeReqId) return;
+    const c = info.get(normCat(rootCat)) || { files: 0, subcats: 0 };
+    rootEl.innerHTML =
+      `<button class="tree-name font-bold text-white text-xs uppercase tracking-widest hover:text-blue-400 transition-colors" data-cat="${esc(rootCat)}">${esc(catDisplayName(rootCat))}</button>` +
+      `<span class="text-[10px] font-mono text-blue-500 font-black ml-2">${c.files.toLocaleString("en-US")} files · ${c.subcats} subcategories</span>`;
+  } catch {
+    rootEl.innerHTML =
+      `<button class="tree-name font-bold text-white text-xs uppercase tracking-widest hover:text-blue-400 transition-colors" data-cat="${esc(rootCat)}">${esc(catDisplayName(rootCat))}</button>`;
+  }
+  content.appendChild(rootEl);
+
+  const kidsEl = document.createElement("div");
+  kidsEl.className = "flex flex-col";
+  content.appendChild(kidsEl);
+  await renderTreeChildren(kidsEl, rootCat, depth, ctx, 1);
+  if (reqId !== treeReqId) return;
+  updateTreeStatus(ctx);
+}
+
+function updateTreeStatus(ctx) {
+  $("tree-status").textContent = ctx.truncated
+    ? `${ctx.nodes}+ categories (truncated)`
+    : `${ctx.nodes} subcategories`;
+}
+
+// Render `levels` levels of children of catTitle into container, auto-expanding
+// to the requested depth. `depth` is the tree depth of the children (root's = 1).
+async function renderTreeChildren(container, catTitle, levels, ctx, depth) {
+  if (levels <= 0) return;
+  if (ctx.nodes >= TREE_MAX_NODES) { ctx.truncated = true; return; }
+  let rows;
+  try {
+    rows = await buildTreeLevel(catTitle);
+  } catch (e) {
+    console.warn("tree level failed:", e);
+    return;
+  }
+  if (ctx.reqId !== treeReqId) return;
+  for (const row of rows) {
+    if (ctx.nodes >= TREE_MAX_NODES) { ctx.truncated = true; break; }
+    ctx.nodes++;
+    const { node, kidsEl, toggleBtn, expand } = treeRowEl(row, depth, ctx, levels - 1);
+    container.appendChild(node);
+    if (levels - 1 > 0 && row.subcats > 0) {
+      await expand(levels - 1); // auto-expand to the requested depth
+      if (ctx.reqId !== treeReqId) return;
+    }
+  }
+}
+
+function treeRowEl(row, depth, ctx, autoLevels = 0) {
+  const node = document.createElement("div");
+  node.className = "tree-node";
+
+  const rowEl = document.createElement("div");
+  rowEl.className = "tree-row flex items-center gap-1.5 py-1 pr-2 rounded";
+  rowEl.style.marginLeft = (depth * 14) + "px";
+  rowEl.style.width = `calc(100% - ${depth * 14}px)`;
+
+  const toggleBtn = document.createElement("button");
+  toggleBtn.className = "w-4 h-4 flex items-center justify-center text-zinc-500 hover:text-white text-[10px] shrink-0";
+  const hasKids = row.subcats > 0;
+  toggleBtn.textContent = hasKids ? "▸" : "·";
+  if (!hasKids) toggleBtn.classList.add("opacity-30", "pointer-events-none");
+  rowEl.appendChild(toggleBtn);
+
+  const nameBtn = document.createElement("button");
+  nameBtn.className = "tree-name text-[11px] text-zinc-300 hover:text-blue-400 transition-colors text-left truncate";
+  nameBtn.textContent = catDisplayName(row.title);
+  nameBtn.title = row.title;
+  nameBtn.setAttribute("data-cat", row.title);
+  rowEl.appendChild(nameBtn);
+
+  const counts = document.createElement("span");
+  counts.className = "text-[9px] font-mono text-zinc-600 ml-auto shrink-0";
+  counts.textContent = `${row.files.toLocaleString("en-US")}f · ${row.subcats}s`;
+  rowEl.appendChild(counts);
+
+  node.appendChild(rowEl);
+
+  const kidsEl = document.createElement("div");
+  kidsEl.className = "tree-children flex flex-col hidden";
+  node.appendChild(kidsEl);
+
+  let loaded = false;
+  const expand = async (levels = 1) => {
+    if (!loaded) {
+      loaded = true;
+      toggleBtn.textContent = "▾";
+      kidsEl.classList.remove("hidden");
+      await renderTreeChildren(kidsEl, row.title, levels, ctx, depth + 1);
+      if (ctx.reqId !== treeReqId) return;
+      updateTreeStatus(ctx);
+    } else {
+      const hidden = kidsEl.classList.toggle("hidden");
+      toggleBtn.textContent = hidden ? "▸" : "▾";
+    }
+  };
+  toggleBtn.addEventListener("click", (e) => {
+    e.stopPropagation();
+    expand();
+  });
+  return { node, kidsEl, toggleBtn, expand };
+}
+
+function handleTreeDeep() {
+  state.deepMode = true;
+  state.sortShuffle = true;
+  syncSortUI();
+  syncDeepUI();
+  closeTreeModal();
+  resetAndFetch();
+}
+
+// One place that reflects deep mode in the UI: the Deep chip in the sort pill
+// and the explainer banner above the grid.
+function syncDeepUI() {
+  $("deep-chip").classList.toggle("hidden", !state.deepMode);
+  const banner = $("deep-banner");
+  if (state.deepMode) {
+    $("deep-banner-cat").textContent = catDisplayName(state.currentCategory);
+    banner.classList.remove("hidden");
+  } else {
+    banner.classList.add("hidden");
+  }
+}
+
+function handleDeepOff() {
+  state.deepMode = false;
+  syncDeepUI();
+  resetAndFetch();
 }
 
 /* ---------------- load orchestration ---------------- */
@@ -583,21 +1158,26 @@ async function fetchImages() {
 
 function resetAndFetch() {
   state.requestId++;
+  treeReqId++;               // any open tree render belongs to the old category
+  state.deepWalk = null;     // deep sampler walks the new category's tree
   state.abort.abort();
   state.abort = new AbortController();
   prefetchPromise = null; // drop any in-flight prefetch for the old category
   lastBatchOk = false;
   state.isLoading = false;
-  state.colIdx = 0;
   state.hasReachedEnd = false;
   state.continueToken = null;
   state.seenTitles = new Set();
   $("end-message").classList.add("hidden");
   $("load-error").classList.add("hidden");
   $("loading-spinner").classList.remove("hidden");
-  for (let i = 0; i < 4; i++) $("col-" + i).innerHTML = "";
+  state.items = [];
+  $("masonry-container").innerHTML = "";
+  ensureColumns(currentCols());
   updateURL();
   fetchCategoryInfo();
+  fetchTreebar();
+  renderCrumbs();
   fetchImages();
 }
 
@@ -619,12 +1199,8 @@ async function handleSearch(e) {
     const data = await api({ action: "query", titles: val }, { ttl: 7 * 24 * 3600e3 });
     const page = (data.query.pages || [])[0];
     if (page && !page.missing) {
-      const official = page.title;
-      addCategoryToConfig(official);
-      state.currentCategory = official;
       input.value = "";
-      rebuildDropdown();
-      resetAndFetch();
+      navigateTo(page.title);
     } else {
       window.alert(`Category not found: ${val}`);
     }
@@ -716,19 +1292,27 @@ async function handleModalSave() {
 }
 
 function handleSelectChange(e) {
-  state.currentCategory = e.target.value;
-  resetAndFetch();
+  navigateTo(e.target.value);
 }
 
 function handleSortToggle() {
   state.sortShuffle = !state.sortShuffle;
+  syncSortUI();
+  // Deep mode requires the shuffle engine (CirrusSearch deepcategory).
+  if (!state.sortShuffle && state.deepMode) {
+    state.deepMode = false;
+    syncDeepUI();
+  }
+  resetAndFetch();
+}
+
+function syncSortUI() {
   $("sort-knob").style.transform = state.sortShuffle ? "translateX(20px)" : "translateX(0px)";
   if (state.sortShuffle) {
     $("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600");
   } else {
     $("sort-toggle").classList.replace("bg-purple-600", "bg-zinc-700");
   }
-  resetAndFetch();
 }
 
 function handleViewToggle() {
@@ -766,6 +1350,26 @@ async function init() {
     $("view-knob").style.transform = "translateX(-20px)";
     $("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800");
   }
+  if (params.get("deep") === "1") {
+    // Deep needs the shuffle engine; force it on.
+    state.deepMode = true;
+    state.sortShuffle = true;
+    $("sort-knob").style.transform = "translateX(20px)";
+    $("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600");
+    syncDeepUI();
+  }
+  const urlDepth = parseInt(params.get("depth"), 10);
+  if (urlDepth >= 1 && urlDepth <= 5) state.treeDepth = urlDepth;
+  $("tree-depth").value = String(state.treeDepth);
+  const urlSize = params.get("size");
+  if (SIZE_COLS[urlSize]) state.size = urlSize;
+  syncSizeUI();
+  const urlPath = params.get("path");
+  if (urlPath) {
+    state.path = decodePath(urlPath);
+    // The trail's last segment wins as the current category.
+    if (state.path.length) state.currentCategory = state.path[state.path.length - 1];
+  }
 
   rebuildDropdown();
   $("search-input").addEventListener("keydown", handleSearch);
@@ -776,6 +1380,71 @@ async function init() {
   $("vibe-select").addEventListener("change", handleSelectChange);
   $("sort-toggle").addEventListener("click", handleSortToggle);
   $("view-toggle").addEventListener("click", handleViewToggle);
+  $("tree-btn").addEventListener("click", openTreeModal);
+  $("tree-close").addEventListener("click", closeTreeModal);
+  $("tree-depth").addEventListener("change", handleDepthChange);
+  $("tree-deep-btn").addEventListener("click", handleTreeDeep);
+  $("about-btn").addEventListener("click", () => {
+    $("about-modal").classList.remove("hidden");
+  });
+  $("about-close").addEventListener("click", () => $("about-modal").classList.add("hidden"));
+  $("about-modal").addEventListener("click", (e) => {
+    if (e.target === $("about-modal")) $("about-modal").classList.add("hidden");
+  });
+  $("deep-chip").addEventListener("click", handleDeepOff);
+  $("deep-banner-off").addEventListener("click", handleDeepOff);
+  for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
+    btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
+  }
+  window.addEventListener("resize", handleResize);
+  // Chip navigation (treebar chips + tree rows + crumbs) via delegation.
+  document.body.addEventListener("click", (e) => {
+    const chip = e.target.closest("[data-cat]");
+    if (!chip) return;
+    const inTreeModal = chip.closest("#tree-content, #treebar, #crumbs");
+    if (!inTreeModal) return;
+    e.preventDefault();
+    navigateTo(chip.getAttribute("data-cat"));
+  });
+
+  // Browser Back/Forward walks the breadcrumb trail: re-sync all state from
+  // the URL and refetch (no push — history already moved).
+  window.addEventListener("popstate", () => {
+    const p2 = new URLSearchParams(location.search);
+    const cat = p2.get("cat");
+    if (!cat) return;
+    const p = p2.get("path");
+    state.path = p ? decodePath(p) : [];
+    if (!state.path.some((c) => normCat(c) === normCat(cat))) state.path = state.path.length ? [] : state.path;
+    state.currentCategory = cat;
+    addCategoryToConfig(cat);
+    state.sortShuffle = p2.get("sort") === "shuffle";
+    state.deepMode = p2.get("deep") === "1";
+    if (state.deepMode) state.sortShuffle = true;
+    syncSortUI();
+    syncDeepUI();
+    state.minimalView = p2.get("view") === "min";
+    $("masonry-container").classList.toggle("minimal-mode", state.minimalView);
+    if (state.minimalView) {
+      $("view-knob").style.transform = "translateX(-20px)";
+      $("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800");
+    } else {
+      $("view-knob").style.transform = "translateX(0px)";
+      $("view-toggle").classList.replace("bg-zinc-800", "bg-blue-600");
+    }
+    const s2 = p2.get("size");
+    if (SIZE_COLS[s2]) state.size = s2;
+    syncSizeUI();
+    const d2 = parseInt(p2.get("depth"), 10);
+    if (d2 >= 1 && d2 <= 5) {
+      state.treeDepth = d2;
+      $("tree-depth").value = String(d2);
+    }
+    state.treeOpen = false;
+    $("tree-modal").classList.add("hidden");
+    rebuildDropdown();
+    resetAndFetch();
+  });
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -786,6 +1455,10 @@ async function init() {
   observer.observe($("sentinel"));
 
   resetAndFetch();
+
+  // Shared links can boot with the tree modal open at a given depth (?tree=1&depth=N).
+  // After resetAndFetch so the tree render isn't killed by the requestId bump.
+  if (params.get("tree") === "1") openTreeModal();
 }
 
 init();
