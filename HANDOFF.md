@@ -234,8 +234,11 @@ history, not graph structure — it's stored as explicit shareable state:
 - `renderCrumbs()` — the `#crumbs` row above the grid (`A › B › current`); crumbs
   navigate (truncating), the current category is non-interactive text.
 - Chip delegation covers `#treebar, #tree-content, #crumbs`.
-- All entry points (tile pills, search, dropdown, treebar/tree/crumb chips) route
-  through `navigateTo`, so the trail is consistent no matter how you descend.
+- **Trail semantics by entry point** (navigateTo's `fresh` flag):
+  - **Descend, trail extends:** tile pills, treebar/tree/crumb chips, roulette.
+  - **Fresh session, trail resets to `[cat]`:** search box and dropdown — picking
+    a new subject shouldn't be anchored to whatever you were browsing.
+  - Browser Back after a fresh pick returns to the previous session (pushState).
 
 **Bug fixed while testing:** categories with zero direct files return
 `{batchcomplete:true}` with no `query` node from `generator=categorymembers` —

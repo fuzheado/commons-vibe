@@ -1112,16 +1112,24 @@ async function fetchTreebar() {
 // modal, dropdown, search). Maintains the breadcrumb trail: descend, or
 // truncate back when the target is already on the path. Choosing a category
 // explicitly also exits list mode.
-function navigateTo(catTitle) {
+// The one chokepoint for category navigation. Maintains the breadcrumb trail:
+// descend (truncate-or-append), or start a fresh session when fresh=true —
+// used by the search box and dropdown, where the user picks a new subject
+// rather than descending into what they're looking at.
+function navigateTo(catTitle, { fresh = false } = {}) {
   if (normCat(catTitle) === normCat(state.currentCategory) && !state.list) return;
   state.list = null;
-  const idx = state.path.findIndex((c) => normCat(c) === normCat(catTitle));
-  if (idx >= 0) {
-    state.path = state.path.slice(0, idx + 1);
+  if (fresh) {
+    state.path = [catTitle];
   } else {
-    if (!state.path.length) state.path = [state.currentCategory];
-    state.path.push(catTitle);
-    if (state.path.length > 12) state.path.shift(); // URL-length guard
+    const idx = state.path.findIndex((c) => normCat(c) === normCat(catTitle));
+    if (idx >= 0) {
+      state.path = state.path.slice(0, idx + 1);
+    } else {
+      if (!state.path.length) state.path = [state.currentCategory];
+      state.path.push(catTitle);
+      if (state.path.length > 12) state.path.shift(); // URL-length guard
+    }
   }
   state.currentCategory = catTitle;
   addCategoryToConfig(catTitle);
@@ -1389,7 +1397,7 @@ async function handleSearch(e) {
     const page = (data.query.pages || [])[0];
     if (page && !page.missing) {
       input.value = "";
-      navigateTo(page.title);
+      navigateTo(page.title, { fresh: true });
     } else {
       window.alert(`Category not found: ${val}`);
     }
@@ -1481,7 +1489,9 @@ async function handleModalSave() {
 }
 
 function handleSelectChange(e) {
-  navigateTo(e.target.value);
+  // Dropdown picks start a fresh session — no breadcrumb linkage to the
+  // category you happened to be on.
+  navigateTo(e.target.value, { fresh: true });
 }
 
 function handleSortToggle() {
