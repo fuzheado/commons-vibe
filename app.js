@@ -1038,7 +1038,7 @@ function buildCard(page) {
 
 /* ---------------- tree UI (treebar + tree modal) ---------------- */
 
-const TREE_MAX_NODES = 300;
+let treeCap = 500; // tree modal node budget; user can extend via Load More
 let treeReqId = 0; // bumped by resetAndFetch so stale tree renders bail out
 
 function treeChipHTML(catTitle, { hidden = false, count = null } = {}) {
@@ -1199,7 +1199,7 @@ async function loadTree() {
   $("tree-status").textContent = "Loading…";
   if (!rootCat) { $("tree-status").textContent = ""; return; }
 
-  const ctx = { reqId, nodes: 0, truncated: false };
+  const ctx = { reqId, nodes: 0, truncated: false, max: treeCap, visited: new Set([normCat(rootCat)]) };
 
   // Root header row (clickable to navigate; counts from categoryinfo).
   const rootEl = document.createElement("div");
@@ -1229,13 +1229,32 @@ function updateTreeStatus(ctx) {
   $("tree-status").textContent = ctx.truncated
     ? `${ctx.nodes}+ categories (truncated)`
     : `${ctx.nodes} subcategories`;
+  let more = $("tree-load-more");
+  if (ctx.truncated) {
+    if (!more) {
+      more = document.createElement("button");
+      more.id = "tree-load-more";
+      more.className = "text-[9px] font-black uppercase tracking-widest bg-blue-700 hover:bg-blue-500 text-white rounded-lg px-3 py-1.5 transition-colors";
+      more.textContent = "Load 500 more";
+      more.title = "Re-walk the tree with a larger budget — already-fetched categories replay instantly from cache";
+      more.addEventListener("click", () => {
+        treeCap += 500;
+        more.remove();
+        more = null;
+        loadTree();
+      });
+      $("tree-status").after(more);
+    }
+  } else if (more) {
+    more.remove();
+  }
 }
 
 // Render `levels` levels of children of catTitle into container, auto-expanding
 // to the requested depth. `depth` is the tree depth of the children (root's = 1).
 async function renderTreeChildren(container, catTitle, levels, ctx, depth) {
   if (levels <= 0) return;
-  if (ctx.nodes >= TREE_MAX_NODES) { ctx.truncated = true; return; }
+  if (ctx.nodes >= ctx.max) { ctx.truncated = true; return; }
   let rows;
   try {
     rows = await buildTreeLevel(catTitle);
@@ -1245,7 +1264,9 @@ async function renderTreeChildren(container, catTitle, levels, ctx, depth) {
   }
   if (ctx.reqId !== treeReqId) return;
   for (const row of rows) {
-    if (ctx.nodes >= TREE_MAX_NODES) { ctx.truncated = true; break; }
+    if (ctx.nodes >= ctx.max) { ctx.truncated = true; break; }
+    if (ctx.visited.has(normCat(row.title))) continue; // DAG cycles
+    ctx.visited.add(normCat(row.title));
     ctx.nodes++;
     const { node, kidsEl, toggleBtn, expand } = treeRowEl(row, depth, ctx, levels - 1);
     container.appendChild(node);
@@ -1607,6 +1628,8 @@ async function init() {
       state.list = { source: "pile", id: urlPile, cursor: 0, titles: [] };
     }
   }
+  const treeCapParam = parseInt(params.get("treecap"), 10);
+  if (treeCapParam > 0) treeCap = treeCapParam; // debug/testing override
   const rawPath = (location.search.match(/[?&]path=([^&]*)/) || [])[1];
   if (rawPath) {
     state.path = decodePath(rawPath);
