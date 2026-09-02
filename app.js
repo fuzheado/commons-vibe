@@ -274,7 +274,6 @@ function writeURL(mode) {
   if (state.deepMode) params.set("deep", "1");
   params.set("size", state.size);
   params.set("type", state.type);
-  if (state.path.length > 1) params.set("path", encodePath(state.path));
   if (state.list) {
     params.set(state.list.source, state.list.id);
     if (state.list.source === "pet") params.set("petdepth", String(state.list.depth));
@@ -283,7 +282,10 @@ function writeURL(mode) {
     params.set("tree", "1");
     params.set("depth", String(state.treeDepth));
   }
-  const qs = "?" + params.toString();
+  // path= is appended raw — encodePath already encodes each segment, and
+  // URLSearchParams would double-encode the % escapes (the %2520 ugliness).
+  let qs = "?" + params.toString();
+  if (state.path.length > 1) qs += "&path=" + encodePath(state.path);
   // Toggles replace (view state); category navigation pushes (Back walks the
   // descent path — see popstate in init).
   if (mode === "push") history.pushState(null, "", qs);
@@ -490,7 +492,11 @@ async function listBatch() {
     viprop: "url|derivatives",
     iiurlwidth: "600",
   });
-  const pages = ((info.query && info.query.pages) || []).filter((p) => !p.missing);
+  // Restore the list's own order (imageinfo responses are pageid-ordered).
+  const byTitle = new Map(((info.query && info.query.pages) || []).map((p) => [normCat(p.title), p]));
+  const pages = slice
+    .map((t) => byTitle.get(normCat(t)))
+    .filter((p) => p && !p.missing);
   return { pages, hasEnded: L.cursor >= L.titles.length };
 }
 
@@ -710,6 +716,9 @@ async function fetchBatch() {
   const data = await api(params, { ttl: 24 * 3600e3 });
   state.continueToken = data.continue || null;
   const pages = (data.query && data.query.pages) || [];
+  // generator+prop responses come back in PAGEID order, not member order —
+  // sort by title so alpha mode is actually alphabetical.
+  pages.sort((a, b) => a.title.localeCompare(b.title, undefined, { sensitivity: "base" }));
   return { pages, hasEnded: !state.continueToken };
 }
 
@@ -1597,9 +1606,9 @@ async function init() {
       state.list = { source: "pile", id: urlPile, cursor: 0, titles: [] };
     }
   }
-  const urlPath = params.get("path");
-  if (urlPath) {
-    state.path = decodePath(urlPath);
+  const rawPath = (location.search.match(/[?&]path=([^&]*)/) || [])[1];
+  if (rawPath) {
+    state.path = decodePath(rawPath);
     // The trail's last segment wins as the current category.
     if (state.path.length) state.currentCategory = state.path[state.path.length - 1];
   }
@@ -1667,7 +1676,8 @@ async function init() {
       state.list = null;
     }
     if (cat && !state.list) {
-      state.path = p2.get("path") ? decodePath(p2.get("path")) : [];
+      const rawPath = (location.search.match(/[?&]path=([^&]*)/) || [])[1];
+      state.path = rawPath ? decodePath(rawPath) : [];
       if (!state.path.some((c) => normCat(c) === normCat(cat))) state.path = [];
       state.currentCategory = cat;
       addCategoryToConfig(cat);
