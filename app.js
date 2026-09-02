@@ -1,9 +1,12 @@
-/* CommonsVibe — vanilla JS engine (v1.10)
+/* CommonsVibe — vanilla JS engine (v1.11)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
  * Tile size control (v1.8): S/M/L density, shortest-column placement, full
  * reflow on size change and window resize. URL param size=s|m|l.
+ * Breadcrumb trail (v1.9): path= URL param, pushState/popstate history walk.
+ * List mode + type filter (v1.11): feed from PagePile (?pile=), PetScan query
+ * (?psid= or ?pet=&petdepth=), and ?type= media-type filter; category roulette.
  * Replaces the PyScript/Pyodide runtime (2026.1.1).
  * Same public URL contract: ?cat=<Category>&sort=alpha|shuffle&view=det|min
  * Same localStorage key: vibe_config
@@ -39,6 +42,8 @@ const state = {
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
+  type: "all",                   // media filter all|image|video|audio (URL param type=)
+  list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   items: [],                     // placed cards in fetch order (reflow source)
   colCount: 0,                   // live column count
@@ -228,6 +233,10 @@ function saveConfig() {
 /* ---------------- header / URL state ---------------- */
 
 async function fetchCategoryInfo() {
+  if (state.list) {
+    $("cat-count").textContent = state.list.titles.length.toLocaleString("en-US");
+    return;
+  }
   try {
     const data = await api(
       { action: "query", titles: state.currentCategory, prop: "categoryinfo" },
@@ -257,13 +266,18 @@ function decodePath(str) {
 
 function writeURL(mode) {
   const params = new URLSearchParams({
-    cat: state.currentCategory,
     sort: state.sortShuffle ? "shuffle" : "alpha",
     view: state.minimalView ? "min" : "det",
   });
+  if (!state.list) params.set("cat", state.currentCategory);
   if (state.deepMode) params.set("deep", "1");
   params.set("size", state.size);
+  params.set("type", state.type);
   if (state.path.length > 1) params.set("path", encodePath(state.path));
+  if (state.list) {
+    params.set(state.list.source, state.list.id);
+    if (state.list.source === "pet") params.set("petdepth", String(state.list.depth));
+  }
   if (state.treeOpen) {
     params.set("tree", "1");
     params.set("depth", String(state.treeDepth));
@@ -282,6 +296,14 @@ function updateURL() {
 function rebuildDropdown() {
   const select = $("vibe-select");
   select.innerHTML = "";
+  if (state.list) {
+    const opt = document.createElement("option");
+    const L = state.list;
+    opt.text = L.source === "pile" ? `PagePile ${L.id}` : L.source === "psid" ? `PetScan ${L.id}` : `PetScan: ${L.id}`;
+    opt.selected = true;
+    select.add(opt);
+    return;
+  }
   const lines = state.config
     .split("\n")
     .map((l) => l.trim())
@@ -358,6 +380,130 @@ async function buildTreeLevel(catTitle) {
 
 const catDisplayName = (t) => t.replace("Category:", "").replaceAll("_", " ");
 
+/* ---------------- media type filter ---------------- */
+
+// CirrusSearch filetype terms (validated live; multi-value needs quotes).
+const TYPE_TERM = {
+  image: 'filetype:"bitmap|drawing"',
+  video: "filetype:video",
+  audio: "filetype:audio",
+};
+
+function typeSearchTerm() {
+  return state.type !== "all" ? " " + TYPE_TERM[state.type] : "";
+}
+
+// Classify a page for client-side filtering (alpha mode / list mode).
+function pageKind(page) {
+  const info = {};
+  if (page.imageinfo && page.imageinfo[0]) Object.assign(info, page.imageinfo[0]);
+  if (page.videoinfo && page.videoinfo[0]) Object.assign(info, page.videoinfo[0]);
+  const mt = (info.mediatype || "").toUpperCase();
+  const mime = (info.mime || "").toLowerCase();
+  if (mt === "VIDEO" || mime.startsWith("video/")) return "video";
+  if (mt === "AUDIO" || mime.startsWith("audio/")) return "audio";
+  if (mt === "BITMAP" || mt === "DRAWING" || mime.startsWith("image/")) return "image";
+  return null; // office docs, unknown — only shown with the All filter
+}
+
+function setType(t) {
+  if (!TYPE_TERM[t] && t !== "all") return;
+  if (state.type === t) return;
+  state.type = t;
+  updateURL();
+  resetAndFetch();
+}
+
+/* ---------------- category roulette ---------------- */
+
+// Jump to a random subcategory, weighted by direct file count so the dice
+// never land on an empty branch (falls back to uniform when all are empty).
+async function categoryRoulette() {
+  if (state.list || !state.currentCategory) return;
+  try {
+    const rows = await buildTreeLevel(state.currentCategory);
+    const withFiles = rows.filter((r) => r.files > 0);
+    const pool = withFiles.length ? withFiles : rows;
+    if (!pool.length) {
+      window.alert("No subcategories to spin through here.");
+      return;
+    }
+    const total = pool.reduce((s, r) => s + Math.max(r.files, 1), 0);
+    let r = Math.random() * total;
+    let pick = pool[pool.length - 1];
+    for (const row of pool) {
+      r -= Math.max(row.files, 1);
+      if (r <= 0) { pick = row; break; }
+    }
+    navigateTo(pick.title);
+  } catch (e) {
+    console.error("roulette failed:", e);
+  }
+}
+
+/* ---------------- list mode (PagePile / PetScan) ---------------- */
+
+// PetScan and PagePile both send access-control-allow-origin: *, so the
+// browser fetches them directly. PetScan response shape:
+//   {"*":[{"a":{"*":[{title,...},...]}}]} — bare titles (no File: prefix).
+function listApiUrl(L) {
+  if (L.source === "pile") return `https://pagepile.toolforge.org/api.php?id=${L.id}&action=get_data&format=json`;
+  if (L.source === "psid") return `https://petscan.wmcloud.org/?psid=${L.id}&format=json&ns%5B6%5D=1`;
+  return `https://petscan.wmcloud.org/?language=commons&project=wikimedia&categories=${encodeURIComponent(L.id)}&ns%5B6%5D=1&depth=${L.depth}&format=json`;
+}
+
+async function loadList() {
+  const L = state.list;
+  const url = listApiUrl(L);
+  const cached = cacheGet(url, 3600e3); // snapshots: 1h
+  if (cached) { L.titles = cached; return; }
+  const resp = await fetch(url, { signal: state.abort.signal, headers: { "Api-User-Agent": UA_NOTE } });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const data = await resp.json();
+  let rows;
+  if (L.source === "pile") rows = data.pages || [];
+  else rows = ((((data["*"] || [])[0] || {}).a || {})["*"]) || [];
+  // PetScan rows are objects ({title, n}); PagePile returns plain strings.
+  const titles = rows
+    .map((t) => (typeof t === "string" ? t : t.title || ""))
+    .filter(Boolean)
+    .map((t) => (/^File:/i.test(t) ? t : "File:" + t));
+  cachePut(url, titles);
+  L.titles = titles;
+}
+
+// List feed: imageinfo per 12-title slice, in list order (deterministic —
+// PetScan output order), skipping titles that resolve to nothing.
+async function listBatch() {
+  const L = state.list;
+  const slice = L.titles.slice(L.cursor, L.cursor + 12);
+  L.cursor += slice.length;
+  if (!slice.length) return { pages: [], hasEnded: true };
+  const info = await api({
+    action: "query",
+    titles: slice.join("|"),
+    prop: "imageinfo|videoinfo|categories",
+    clprop: "hidden",
+    cllimit: "max",
+    iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    viprop: "url|derivatives",
+    iiurlwidth: "600",
+  });
+  const pages = ((info.query && info.query.pages) || []).filter((p) => !p.missing);
+  return { pages, hasEnded: L.cursor >= L.titles.length };
+}
+
+function setList(source, id, depth) {
+  state.list = { source, id, depth: depth || 1, cursor: 0, titles: [] };
+  state.path = [];
+  syncDeepUI();
+  return loadList().catch((e) => {
+    console.error("list load failed:", e);
+    state.list = null;
+    window.alert(`Couldn't load that ${source === "pile" ? "PagePile" : "PetScan"} list: ${e.message}`);
+  });
+}
+
 /* ---------------- batch fetching (alpha + shuffle) ---------------- */
 
 // Pull up to `limit` unseen titles from search results, marking them seen.
@@ -379,7 +525,7 @@ async function flatSampleTitles() {
   const search = await api({
     action: "query",
     list: "search",
-    srsearch: `incategory:"${catName}"`,
+    srsearch: `incategory:"${catName}"${typeSearchTerm()}`,
     srnamespace: "6",
     srlimit: "50",
     srsort: "random",
@@ -445,7 +591,7 @@ async function deepSampleTitles() {
     const search = await api({
       action: "query",
       list: "search",
-      srsearch: `deepcategory:"${catName}"`,
+      srsearch: `deepcategory:"${catName}"${typeSearchTerm()}`,
       srnamespace: "6",
       srlimit: "50",
       srsort: "random",
@@ -473,7 +619,7 @@ async function deepSampleTitles() {
   const search = await api({
     action: "query",
     list: "search",
-    srsearch: `incategory:"${catName}"`,
+    srsearch: `incategory:"${catName}"${typeSearchTerm()}`,
     srnamespace: "6",
     srlimit: "50",
     srsort: "random",
@@ -482,6 +628,7 @@ async function deepSampleTitles() {
 }
 
 async function fetchBatch() {
+  if (state.list) return listBatch();
   if (state.sortShuffle) {
     // Shuffle: random draw + one batched info call. Never cached (serendipity).
     const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
@@ -493,7 +640,7 @@ async function fetchBatch() {
         prop: "imageinfo|videoinfo|categories",
         clprop: "hidden",
         cllimit: "max",
-        iiprop: "url|extmetadata|derivatives",
+        iiprop: "url|extmetadata|derivatives|mediatype|mime",
         viprop: "url|derivatives",
         iiurlwidth: "600",
       });
@@ -513,7 +660,7 @@ async function fetchBatch() {
     prop: "imageinfo|videoinfo|categories",
     clprop: "hidden",
     cllimit: "max",
-    iiprop: "url|extmetadata|derivatives",
+    iiprop: "url|extmetadata|derivatives|mediatype|mime",
     viprop: "url|derivatives",
     iiurlwidth: "600",
   };
@@ -667,6 +814,9 @@ function renderPages(pages) {
   ensureColumns(currentCols());
   for (const page of pages) {
     if (!("imageinfo" in page) && !("videoinfo" in page)) continue;
+    // Type filter (client-side; shuffle/deep also filter server-side). Filtered
+    // batches render nothing and the sentinel fill-up just fetches more.
+    if (state.type !== "all" && pageKind(page) !== state.type) continue;
     const card = buildCard(page);
     if (!card) continue;
     state.items.push(card);
@@ -889,7 +1039,7 @@ async function fetchTreebar() {
   pEl.innerHTML = "";
   sEl.innerHTML = "";
   const cat = state.currentCategory;
-  if (!cat) { bar.classList.add("hidden"); return; }
+  if (!cat || state.list) { bar.classList.add("hidden"); return; }
   bar.classList.remove("hidden");
 
   // Parents (breadcrumb up) — independent of subcat fetch.
@@ -923,14 +1073,25 @@ async function fetchTreebar() {
       more.addEventListener("click", openTreeModal);
       sEl.appendChild(more);
     }
+    // Category roulette — random subcategory, weighted by file count.
+    if (rows.length) {
+      const dice = document.createElement("button");
+      dice.className = "cat-pill px-2 py-1 rounded-full text-[9px] font-bold bg-purple-700 text-white hover:bg-purple-500 transition-colors";
+      dice.textContent = "🎲 Roulette";
+      dice.title = "Jump to a random subcategory (weighted by file count)";
+      dice.addEventListener("click", categoryRoulette);
+      sEl.appendChild(dice);
+    }
   }).catch((e) => console.warn("treebar subcats failed:", e));
 }
 
 // The one chokepoint for category navigation (tile pills, treebar chips, tree
 // modal, dropdown, search). Maintains the breadcrumb trail: descend, or
-// truncate back when the target is already on the path.
+// truncate back when the target is already on the path. Choosing a category
+// explicitly also exits list mode.
 function navigateTo(catTitle) {
-  if (normCat(catTitle) === normCat(state.currentCategory)) return;
+  if (normCat(catTitle) === normCat(state.currentCategory) && !state.list) return;
+  state.list = null;
   const idx = state.path.findIndex((c) => normCat(c) === normCat(catTitle));
   if (idx >= 0) {
     state.path = state.path.slice(0, idx + 1);
@@ -1127,7 +1288,9 @@ function handleDeepOff() {
 let lastBatchOk = false;
 
 async function fetchImages() {
-  if (state.isLoading || state.hasReachedEnd || !state.currentCategory) return;
+  // List mode has no current category; everything else requires one.
+  if (state.isLoading || state.hasReachedEnd) return;
+  if (!state.currentCategory && !state.list) return;
   state.isLoading = true;
   const reqId = state.requestId;
   try {
@@ -1174,6 +1337,8 @@ function resetAndFetch() {
   state.items = [];
   $("masonry-container").innerHTML = "";
   ensureColumns(currentCols());
+  if (state.list) state.list.cursor = 0;
+  $("sort-pill").classList.toggle("hidden", !!state.list); // Alpha/Shuffle N/A for lists
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
@@ -1364,6 +1529,21 @@ async function init() {
   const urlSize = params.get("size");
   if (SIZE_COLS[urlSize]) state.size = urlSize;
   syncSizeUI();
+  const urlType = params.get("type");
+  if (urlType && (urlType === "all" || TYPE_TERM[urlType])) state.type = urlType;
+  $("type-select").value = state.type;
+  const urlPile = params.get("pile");
+  const urlPsid = params.get("psid");
+  const urlPet = params.get("pet");
+  if (urlPile || urlPsid || urlPet) {
+    if (urlPet) {
+      state.list = { source: "pet", id: urlPet, depth: Math.min(parseInt(params.get("petdepth"), 10) || 1, 5), cursor: 0, titles: [] };
+    } else if (urlPsid) {
+      state.list = { source: "psid", id: urlPsid, cursor: 0, titles: [] };
+    } else {
+      state.list = { source: "pile", id: urlPile, cursor: 0, titles: [] };
+    }
+  }
   const urlPath = params.get("path");
   if (urlPath) {
     state.path = decodePath(urlPath);
@@ -1393,6 +1573,7 @@ async function init() {
   });
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
+  $("type-select").addEventListener("change", (e) => setType(e.target.value));
   for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
     btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
   }
@@ -1409,15 +1590,39 @@ async function init() {
 
   // Browser Back/Forward walks the breadcrumb trail: re-sync all state from
   // the URL and refetch (no push — history already moved).
-  window.addEventListener("popstate", () => {
+  window.addEventListener("popstate", async () => {
     const p2 = new URLSearchParams(location.search);
     const cat = p2.get("cat");
-    if (!cat) return;
-    const p = p2.get("path");
-    state.path = p ? decodePath(p) : [];
-    if (!state.path.some((c) => normCat(c) === normCat(cat))) state.path = state.path.length ? [] : state.path;
-    state.currentCategory = cat;
-    addCategoryToConfig(cat);
+    const pileId = p2.get("pile");
+    const psid = p2.get("psid");
+    const pet = p2.get("pet");
+    if (!cat && !pileId && !psid && !pet) return;
+    if (pileId || psid || pet) {
+      if (pet) {
+        state.list = { source: "pet", id: pet, depth: Math.min(parseInt(p2.get("petdepth"), 10) || 1, 5), cursor: 0, titles: [] };
+      } else if (psid) {
+        state.list = { source: "psid", id: psid, cursor: 0, titles: [] };
+      } else {
+        state.list = { source: "pile", id: pileId, cursor: 0, titles: [] };
+      }
+      try {
+        await loadList();
+      } catch {
+        state.list = null;
+      }
+    } else {
+      state.list = null;
+    }
+    if (cat && !state.list) {
+      state.path = p2.get("path") ? decodePath(p2.get("path")) : [];
+      if (!state.path.some((c) => normCat(c) === normCat(cat))) state.path = [];
+      state.currentCategory = cat;
+      addCategoryToConfig(cat);
+    }
+    if (state.list) {
+      state.path = [];
+      state.currentCategory = state.currentCategory || "";
+    }
     state.sortShuffle = p2.get("sort") === "shuffle";
     state.deepMode = p2.get("deep") === "1";
     if (state.deepMode) state.sortShuffle = true;
@@ -1435,6 +1640,11 @@ async function init() {
     const s2 = p2.get("size");
     if (SIZE_COLS[s2]) state.size = s2;
     syncSizeUI();
+    const t2 = p2.get("type");
+    if (t2 === "all" || TYPE_TERM[t2]) {
+      state.type = t2;
+      $("type-select").value = t2;
+    }
     const d2 = parseInt(p2.get("depth"), 10);
     if (d2 >= 1 && d2 <= 5) {
       state.treeDepth = d2;
@@ -1453,6 +1663,16 @@ async function init() {
     { rootMargin: "800px 0px" },
   );
   observer.observe($("sentinel"));
+
+  if (state.list) {
+    try {
+      await loadList();
+    } catch (e) {
+      console.error("list load failed:", e);
+      window.alert(`Couldn't load the ${state.list.source === "pile" ? "PagePile" : "PetScan"} list: ${e.message}`);
+      state.list = null;
+    }
+  }
 
   resetAndFetch();
 

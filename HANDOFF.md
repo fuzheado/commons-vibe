@@ -40,7 +40,14 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&path=<trail>[&deep=1][&tree=1&depth=N]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio&path=<trail>[&deep=1][&tree=1&depth=N][&pile=|&psid=|&pet=&petdepth=]`.
+  `type=` filters the feed client-side (alpha/list) and server-side (shuffle/deep
+  append CirrusSearch `filetype:` terms). `pile=`/`psid=`/`pet=` activate **list
+  mode**: the feed renders an external file list instead of a category
+  (`pet=` runs a live PetScan query on a category with `petdepth=`; 1h client
+  cache). List mode hides the sort pill and treebar; the dropdown shows the
+  list label; clicking any category pill exits list mode. All previous params
+  behave exactly as before.
   `path=` is the breadcrumb trail: segments are URI-encoded (category names may
   contain `/` — it becomes `%2F`) and joined with `/`; written only once the trail
   has 2+ segments (plain `?cat=X` links stay clean). Category navigation
@@ -98,6 +105,15 @@ python3 -m http.server 8123        # any static server works; no build step
     Back/Forward walks the trail (state re-syncs, tiles reload); sharing a URL
     with `path=` boots with the trail intact; an empty category shows "End of
     Collection" instead of an error.
+16. Roulette: 🎲 chip ends the subcategory chip row; each spin lands on a
+    subcategory that has files; trail + Back/Forward integrate.
+17. Type filter: header select — Images/Video/Audio filter the feed (shuffle
+    filters server-side; alpha client-side); `type=` round-trips; "All Media"
+    restores.
+18. List mode: `?pet=<Cat>&petdepth=N` (or `?pile=`/`?psid=`) renders the list
+    as a feed — dropdown shows the list label, sort pill hidden, size/view/type
+    still work; clicking a tile's category pill exits list mode into that
+    category.
 
 ## Deploy to Toolforge
 
@@ -166,6 +182,29 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   depth-N auto-expanding modal tree; `TREE_MAX_NODES = 300` caps runaway trees;
   `treeReqId` (bumped by `resetAndFetch`) kills stale renders.
 - `handleTreeDeep()` / `handleDeepOff()` / `syncSortUI()` — deep mode plumbing.
+
+### Roulette, type filter, list mode (v1.11)
+
+- **Roulette:** 🎲 chip at the end of the treebar's subcategory row;
+  `categoryRoulette()` picks a random subcategory **weighted by direct file
+  count** (never lands on an empty branch; uniform fallback), via `navigateTo`
+  so the trail/history integrate.
+- **Type filter:** header `type-select` (All/Images/Video/Audio). `pageKind()`
+  classifies from `mediatype`/`mime` (now requested explicitly —
+  `iiprop=url|extmetadata|derivatives` OVERRIDES API defaults and omits them;
+  classic gotcha). Client-side in renderPages (alpha/list) + server-side
+  `filetype:` terms in shuffle/deep searches (`TYPE_TERM`; multi-value
+  `filetype:"bitmap|drawing"` needs quotes).
+- **List mode:** `state.list = {source:'pile'|'psid'|'pet', id, depth?, titles,
+  cursor}`. `loadList()` fetches (CORS is open on both services — verified):
+  PagePile `pagepile.toolforge.org/api.php?id=N&action=get_data` (note: host
+  moved off wikimedia.cloud), PetScan `petscan.wmcloud.org/?psid=N&format=json`,
+  or a live PetScan query (`pet=` + `petdepth=`). Rows: PetScan returns OBJECTS
+  ({title}), PagePile strings — both normalized to `File:`-prefixed titles.
+  `listBatch()` renders in list order (12/batch via imageinfo, missing titles
+  skipped). `fetchImages` guard relaxed: list mode has no current category.
+  Exiting: click any category pill (navigateTo clears state.list), or navigate
+  via search/dropdown.
 
 ### Tile layout (v1.8)
 
@@ -263,6 +302,11 @@ mode (file IDs via URL). Cost: minutes for huge trees, stale after mass uploads 
 fine for a snapshot feature, wrong for a live shuffle.
 
 ## Known issues / open items
+
+0. **CirrusSearch keyword instability (transient, server-side):** during
+   testing, `incategory:`/`deepcategory:` intermittently returned zero results
+   (T246568 degradation). Client code is correct; if shuffle suddenly returns
+   nothing, check the search API directly before debugging the app.
 
 1. **Server git checkout is stale** — `/data/project/commons-vibe/public_html/.git` is an
    orphaned March checkout (FETCH_HEAD `f3e0b71`; HEAD on a dead `master` ref).
