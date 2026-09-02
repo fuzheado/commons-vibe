@@ -43,6 +43,7 @@ const state = {
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
   type: "all",                   // media filter all|image|video|audio (URL param type=)
+  lastDeepPicks: new Set(),      // categories used by the previous deep batch
   list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   items: [],                     // placed cards in fetch order (reflow source)
@@ -581,10 +582,14 @@ async function collectSubtree(rootCat, { depth = DEEP_WALK_DEPTH, maxNodes = DEE
   return pool;
 }
 
-// Deep shuffle: pick one category uniformly at random weighted by its direct
-// file count (files in many categories get multiple tickets — uniform over
-// categories, not perfectly over files — but covers the full-depth tree with
-// exact per-category draws, unlike the truncating deepcategory: envelope).
+// Deep shuffle: draw each batch from SEVERAL distinct subcategories so a
+// single event/subject can't fill the whole screen (a v1.7 complaint: one
+// weighted pick of 12 files turned every screen into one event's red carpet).
+// Still weighted sampling — per-file fairness is unchanged — but each batch
+// spans k distinct categories, and the previous batch's picks are avoided.
+const DEEP_BATCH_SPREAD = 4; // categories per batch
+const DEEP_DRAW_LIMIT = 6;   // random files fetched per chosen category
+
 async function deepSampleTitles() {
   const fallbackDraw = async () => {
     const catName = state.currentCategory.replace(/^Category:/, "").replace(/_/g, " ");
@@ -607,24 +612,42 @@ async function deepSampleTitles() {
   }
   const pool = await Promise.race([state.deepWalk, sleep(800).then(() => null)]);
   if (!pool) return fallbackDraw();
-  const total = pool.reduce((s, n) => s + n.files, 0);
-  if (!total) return fallbackDraw(); // no direct files anywhere in the envelope
-  let r = Math.random() * total;
-  let pick = pool[pool.length - 1];
-  for (const node of pool) {
-    r -= node.files;
-    if (r <= 0) { pick = node; break; }
+  const weighted = pool.filter((n) => n.files > 0);
+  if (!weighted.length) return fallbackDraw();
+  // Prefer categories the previous batch didn't use (cross-batch variety).
+  let candidates = weighted.filter((n) => !state.lastDeepPicks.has(normCat(n.title)));
+  if (!candidates.length) candidates = weighted;
+  // Weighted pick without replacement of k distinct categories.
+  const picks = [];
+  const cands = candidates.slice();
+  let w = cands.reduce((s, n) => s + n.files, 0);
+  const k = Math.min(DEEP_BATCH_SPREAD, cands.length);
+  for (let i = 0; i < k && cands.length; i++) {
+    let r = Math.random() * w;
+    let idx = cands.length - 1;
+    for (let j = 0; j < cands.length; j++) {
+      r -= cands[j].files;
+      if (r <= 0) { idx = j; break; }
+    }
+    picks.push(cands[idx]);
+    w -= cands[idx].files;
+    cands.splice(idx, 1);
   }
-  const catName = pick.title.replace(/^Category:/, "").replace(/_/g, " ");
-  const search = await api({
-    action: "query",
-    list: "search",
-    srsearch: `incategory:"${catName}"${typeSearchTerm()}`,
-    srnamespace: "6",
-    srlimit: "50",
-    srsort: "random",
-  });
-  return pickNewTitles((search.query && search.query.search) || []);
+  state.lastDeepPicks = new Set(picks.map((p) => normCat(p.title)));
+  const typeTerm = typeSearchTerm();
+  const draws = await mapLimit(picks, 4, (p) =>
+    api({
+      action: "query",
+      list: "search",
+      srsearch: `incategory:"${p.title.replace(/^Category:/, "").replace(/_/g, " ")}"${typeTerm}`,
+      srnamespace: "6",
+      srlimit: String(DEEP_DRAW_LIMIT),
+      srsort: "random",
+    }).then((d) => (d.query && d.query.search) || []).catch(() => [])
+  );
+  // Interleave so categories mix within the batch, then dedupe to 12.
+  const titles = shuffle(draws.flat().map((r) => r.title));
+  return pickNewTitles(titles);
 }
 
 async function fetchBatch() {
@@ -1323,6 +1346,7 @@ function resetAndFetch() {
   state.requestId++;
   treeReqId++;               // any open tree render belongs to the old category
   state.deepWalk = null;     // deep sampler walks the new category's tree
+  state.lastDeepPicks = new Set();
   state.abort.abort();
   state.abort = new AbortController();
   prefetchPromise = null; // drop any in-flight prefetch for the old category

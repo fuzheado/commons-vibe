@@ -254,8 +254,12 @@ are biased toward whatever survived the clip. Instead:
 1. `collectSubtree()` walks the subtree client-side (BFS, depth 5 / 500-node cap,
    cycle-safe via `normCat` set), gathering each category's **direct** file count
    from `categoryinfo` — all through the 24h/7d cache, so the walk cost is paid once.
-2. Pick one category uniformly weighted by direct file count.
-3. Draw `srsearch=incategory:"chosen"&srsort=random&srlimit=50` — exact, uncapped.
+2. Pick **k=4 distinct categories** uniformly weighted by direct file count
+   (without replacement; the previous batch's picks are excluded for cross-batch
+   variety — `state.lastDeepPicks`). v1.7 drew all 12 from ONE category, which
+   filled whole screens with a single event ("TIFF carpet" clustering).
+3. Draw `incategory:"chosen"&srsort=random&srlimit=6` from each (4 parallel
+   searches), interleave, dedupe to 12 — at most ~3 tiles per subject per screen.
 
 While the walk is still running (cold cache, ~1–4 min for big trees), batches fall
 back to a `deepcategory:` draw so tiles appear immediately; once it lands, batches
@@ -290,7 +294,9 @@ membership listed). Run: `node benchmark/deep-shuffle.js [Category:...] [--live]
 - **Server random:** 40 live `srsort=random` draws over a 36-file category returned
   every file exactly 40 times — no measurable server-side bias in `incategory` draws.
 - Verdict: fair within the documented multiplicity trade-off — worst case a file is
-  ~2.2x likelier than a single-category file, best case ~0.73x.
+  ~2.2x likelier than a single-category file, best case ~0.73x. The k=4 batch
+  spread (above) preserves these per-file marginals while killing within-screen
+  clustering; re-run the benchmark if you change pool weighting.
 
 ### Future: exact full-tree sampling (option 3)
 
