@@ -614,8 +614,26 @@ async function deepSampleTitles() {
   if (!pool) return fallbackDraw();
   const weighted = pool.filter((n) => n.files > 0);
   if (!weighted.length) return fallbackDraw();
-  // Prefer categories the previous batch didn't use (cross-batch variety).
-  let candidates = weighted.filter((n) => !state.lastDeepPicks.has(normCat(n.title)));
+
+  // Retry until we have a full batch of NEW titles. A single spread draw can
+  // come back nearly all-dupes when it lands on tiny categories whose few
+  // files an earlier batch already showed — that must not end the feed.
+  const exclude = new Set(state.lastDeepPicks);
+  const fresh = [];
+  for (let attempt = 0; attempt < 3 && fresh.length < 12; attempt++) {
+    fresh.push(...pickNewTitles(await drawSpread(weighted, exclude)));
+  }
+  if (!fresh.length) return fallbackDraw(); // genuinely exhausted (or search degraded)
+  state.lastDeepPicks = exclude;
+  return fresh;
+}
+
+// One spread draw: k distinct weighted categories (excluding `exclude`, which
+// is mutated so retries automatically avoid already-tried categories), a few
+// random files each, interleaved. Returns raw search-result OBJECTS (pickNew
+// dedupes by .title).
+async function drawSpread(weighted, exclude) {
+  let candidates = weighted.filter((n) => !exclude.has(normCat(n.title)));
   if (!candidates.length) candidates = weighted;
   // Weighted pick without replacement of k distinct categories.
   const picks = [];
@@ -633,7 +651,7 @@ async function deepSampleTitles() {
     w -= cands[idx].files;
     cands.splice(idx, 1);
   }
-  state.lastDeepPicks = new Set(picks.map((p) => normCat(p.title)));
+  for (const p of picks) exclude.add(normCat(p.title));
   const typeTerm = typeSearchTerm();
   const draws = await mapLimit(picks, 4, (p) =>
     api({
@@ -645,9 +663,10 @@ async function deepSampleTitles() {
       srsort: "random",
     }).then((d) => (d.query && d.query.search) || []).catch(() => [])
   );
-  // Interleave so categories mix within the batch, then dedupe to 12.
-  const titles = shuffle(draws.flat().map((r) => r.title));
-  return pickNewTitles(titles);
+  // Interleave so categories mix within the batch. Result OBJECTS — pickNew
+  // reads .title (passing pre-mapped strings here returned [undefined] and
+  // ended the feed after one batch).
+  return shuffle(draws.flat());
 }
 
 async function fetchBatch() {
@@ -655,6 +674,7 @@ async function fetchBatch() {
   if (state.sortShuffle) {
     // Shuffle: random draw + one batched info call. Never cached (serendipity).
     const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
+    console.info("BATCH-DEBUG deep titles:", titles.length, "first:", (titles[0] || "NONE").slice(0, 50));
     let pages = [];
     if (titles.length) {
       const info = await api({
