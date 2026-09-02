@@ -101,6 +101,7 @@ Repeat for `app.js`, `style.css`, `categories.txt`, `.htaccess`. Static-file cha
 CommonsVibe is built to be lightweight and URL-driven.
 * **Engine:** Vanilla JavaScript (ES module) — no framework, no build step. The app ships as `index.html` + `app.js` + `style.css` and boots instantly (previously PyScript/Pyodide; replaced August 2026).
 * **API:** Interacts directly with the Wikimedia Action API and CirrusSearch, with a client-side response cache (localStorage + in-memory, TTL per endpoint kind) so repeat visits and back-navigation are instant. Category-tree data (v1.6: parents, subcats, counts) flows through the same cache — tree re-opens are instant.
+* **Correctness details:** generator + prop responses arrive in pageid order, so alpha mode sorts by title client-side; list mode restores PetScan/PagePile order. All requests pass through a global pacing throttle (polite to Wikimedia's APIs, immune to self-inflicted 429s).
 * **Infinite Scroll:** One-batch prefetch lookahead keeps the grid feeding smoothly; stale requests are aborted.
 * **Media:** Hover-to-play video with `preload="none"` (no bytes until hover), retina-aware thumbnails derived from the 600px base thumb, robust video/audio detection via API `mediatype`/`mime` fields.
 * **Routing:** Heavy emphasis on URL parameter persistence to ensure the "Shareable View" philosophy.

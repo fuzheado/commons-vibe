@@ -9,8 +9,9 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (as of this handoff)
+## Current state (updated 2026-09-02, v1.11 deployed)
 
+- **Deployed:** live site matches `main` (PRs #4–#7 merged and verified via SHA256).
 - **Engine:** Vanilla JS ES module (`app.js`). The PyScript/Pyodide 2026.1.1 build was
   fully replaced (commit `77a3e93`) — the app is DOM/API glue, and the ~10 MB WASM
   runtime was pure overhead. **Do not reintroduce PyScript.**
@@ -154,8 +155,26 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **Batching:** max 50 titles per query; editor validation chunks at 50.
 - **Caching:** `{ttl: N}` enables the localStorage cache. NEVER cache shuffle searches
   (`{ttl: 0}`) — serendipity dies. Alpha batches: 24h; categoryinfo/validation: 7d.
-- **Retry/abort:** 429/5xx retried with exponential backoff (max 4 attempts); every
-  reset aborts in-flight fetches (`state.abort`) and bumps `state.requestId`.
+- **Retry/abort:** 429/5xx retried with exponential backoff (max 4 attempts — api()
+  then throws "API retries exhausted" rather than returning undefined); every reset
+  aborts in-flight fetches (`state.abort`) and bumps `state.requestId`. apiThrottle()
+  adds a global 150ms gap between request starts (tree walks once tripped 429s).
+- **Generator + prop = pageid order:** `generator=categorymembers` (or any generator)
+  combined with `prop=...` returns pages sorted by PAGEID, not member order. Alpha
+  mode must sort by title client-side, and list mode must restore its own order —
+  never trust response order.
+- **iiprop overrides defaults:** specifying `iiprop=url|extmetadata|derivatives`
+  silently DROPS `mediatype`/`mime` (they're default props). Request them
+  explicitly when classifying pages.
+- **Empty generator results:** a generator query with zero matches returns
+  `{batchcomplete:true}` with no `query` node — guard `(data.query && data.query.pages)`.
+- **CirrusSearch keyword instability:** `incategory:`/`deepcategory:` intermittently
+  return zero results server-side (T246568 degradation — observed live). The deep
+  sampler's retry loop exists partly for this; check the search API directly before
+  debugging the app.
+- **CORS-friendly helpers:** PagePile (`pagepile.toolforge.org` — host moved off
+  wikimedia.cloud) and PetScan (`petscan.wmcloud.org`) both send
+  `access-control-allow-origin: *`; the browser fetches them directly.
 
 ## Code map (`app.js`)
 
