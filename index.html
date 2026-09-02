@@ -77,11 +77,12 @@
                     <li>• <strong class="text-zinc-200">Deep shuffle</strong> samples an entire subtree at once — tiles are drawn from the category and all of its subcategories.</li>
                     <li>• <strong class="text-zinc-200">Adjust tile size</strong> (S/M/L) to go from a dense thumbnail wall to big previews.</li>
                     <li>• <strong class="text-zinc-200">Share what you see</strong> — the URL captures your category, trail, and settings, so any link opens the exact same view.</li>
+                    <li>• <strong class="text-zinc-200">Feed it a list</strong> — turn any PetScan query or PagePile into a browsable feed by adding a URL parameter: <code class="text-blue-400">?pet=&lt;Category&gt;&amp;petdepth=N</code> for a live PetScan subtree query, <code class="text-blue-400">?psid=&lt;id&gt;</code> for a saved PetScan query, or <code class="text-blue-400">?pile=&lt;id&gt;</code> for a PagePile. Run a PetScan search, hit <em>"Create PagePile"</em>, and its number becomes a feed.</li>
                 </ul>
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span>v1.10</span>
+                    <span>v1.11</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>
@@ -129,19 +130,25 @@
                         <button data-size="m" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">M</button>
                         <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">L</button>
                     </div>
-                    <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
+                    <select id="type-select" class="bg-zinc-900/50 text-[9px] font-bold uppercase tracking-widest text-zinc-300 border border-zinc-800 rounded-full px-2.5 py-2 outline-none focus:border-blue-600 cursor-pointer" title="Filter by media type">
+                        <option value="all">All Media</option>
+                        <option value="image">Images</option>
+                        <option value="video">Video</option>
+                        <option value="audio">Audio</option>
+                    </select>
+                    <div id="sort-pill" class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
                         <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Alpha</span>
                         <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner">
                             <div id="sort-knob" class="absolute top-1 left-1 w-3 h-3 bg-white rounded-full toggle-transition"></div>
                         </button>
                         <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Shuffle</span>
                         <button id="deep-chip" class="hidden text-[9px] font-black uppercase tracking-widest bg-purple-600 hover:bg-purple-500 text-white rounded-full px-2.5 py-1 transition-colors shadow" title="Deep shuffle is ON — the feed samples this category and all its subcategories. Click to turn off.">Deep ✓</button>
-                        <button id="refresh-btn" class="p-1.5 bg-zinc-800 hover:bg-blue-600 rounded-full text-zinc-400 hover:text-white transition-all shadow-lg group" title="Re-shuffle / Refresh">
-                            <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                            </svg>
-                        </button>
                     </div>
+                    <button id="refresh-btn" class="p-1.5 bg-zinc-900/50 hover:bg-blue-600 rounded-full text-zinc-400 hover:text-white transition-all shadow-lg border border-zinc-800" title="Re-shuffle / Refresh">
+                        <svg id="refresh-icon" xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                        </svg>
+                    </button>
                     <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
                         <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Min</span>
                         <button id="view-toggle" class="w-10 h-5 bg-blue-600 rounded-full relative toggle-transition shadow-inner">

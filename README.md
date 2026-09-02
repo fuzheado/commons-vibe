@@ -15,6 +15,8 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.
 * **Shareable tree views:** `&tree=1&depth=N` boots with the tree modal open at your chosen depth.
 * **Quickly scrub and play video** by visiting a category of WebM videos and hovering your pointer over a tile to preview it without sound. (On mobile, tapping a tile opens the file page on Commons.)
+* **Spin the 🎲 roulette** to hop into a random subcategory, and **filter by media type** (images / video / audio) from the header.
+* **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed.
 
 ## **A running version can be found at: https://commons-vibe.toolforge.org/**
 
@@ -59,11 +61,11 @@ Both modes work in **Detailed** (filename + 3-line description) and **Minimal** 
 CommonsVibe is evolving from a browser into a personal curation tool. Planned features include:
 
 * **~~Category Tree Exploration~~ — shipped in v1.6:** tree modal (depth 1–5, lazy expand, file-count badges), parent/subcategory chip row, and Deep mode (`deepcategory` shuffle across the whole subtree, `?deep=1` in the URL). Still open from the original plan: multi-select union feeds, "category roulette", tree-aware `path=` URL state.
-* **List Mode:** A curated "Snapshot" mode. This allows the app to load a specific set of files via their unique IDs passed through the URL—perfect for sharing a specific "vibe" or a curated set of random finds that you want to preserve for someone else.
+* **List Mode — v1.11 shipped the first slice:** feed PagePiles (`?pile=`), saved PetScan queries (`?psid=`), or live PetScan queries (`?pet=&petdepth=`). Still open: hand-curated file-ID lists and "clip this image" affordances.
 * **Personal Collections:** The ability to "clip" or save images into your own custom sets.
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
-* **Filtering:** Filter based on filetype (eg. no TIF files, only WEBM files), more advanced display of media files.
+* **~~Filtering~~ — shipped in v1.11:** media-type filter (images / video / audio) in the header, applied server-side in shuffle mode and client-side elsewhere. Still open: granular filters (e.g. exclude TIFF specifically).
 
 ---
 
