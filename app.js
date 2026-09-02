@@ -674,7 +674,6 @@ async function fetchBatch() {
   if (state.sortShuffle) {
     // Shuffle: random draw + one batched info call. Never cached (serendipity).
     const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
-    console.info("BATCH-DEBUG deep titles:", titles.length, "first:", (titles[0] || "NONE").slice(0, 50));
     let pages = [];
     if (titles.length) {
       const info = await api({
