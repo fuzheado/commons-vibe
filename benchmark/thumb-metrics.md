@@ -66,6 +66,23 @@ Sampled the first rendered tiles on the live feed (birds category, M density):
 Browser srcset behavior verified: 284px slot, `sizes="294px"`, candidates
 `500w + 960w` → **chose 500px** at DPR 1 (960w reserved for retina/L-density).
 
+## Timeline: when did this happen?
+
+| date | event | source |
+|---|---|---|
+| 2017 | Thumbor replaces MediaWiki-side thumbnailing — the architecture the old skill docs described | T121388, Diff blog series |
+| 2026-06-08 | DNS commit `b9a19e3` "wikimedia.org: Introduce thumb.wikimedia.org" (ref T427465) | operations-dns git |
+| FY26-27 (Jul '26–Jun '27) | Umbrella task **T431141 "Evolve thumbnail infrastructure"** (Ladsgroup); **T427465 "Move thumbnail caching from upload cluster to text"** subtask — **In Progress**, staged per-wiki rollout | Phabricator |
+| ~Aug 2026 | Varnish VCL reconfigured for thumb serving on the text cluster (T435193) | SAL / gerrit |
+| 2026-08-27 | **T435979** TemplateStyles allow-lists thumb.wikimedia.org, deployed to production (gerrit 1329317) | SAL |
+| rolling | Per-wiki exposure of the new thumbnail endpoint (e.g. "Expose the new thumbnail endpoint on dewiki (T427465)"); **no public date for when commons.wikimedia.org flipped** — it landed somewhere between our 2026-09-02 session (old behavior observed) and the 2026-09-03 audit (new behavior) | production SAL |
+| 2026-09-03 | Noticed during the CommonsVibe image audit; fixed in v1.12 | this repo |
+
+**Status: migration in flight.** T427465 is still In Progress under the FY26-27
+umbrella; expect thumb behavior (hosts, buckets, endpoints) to keep shifting.
+Related open work: **T425181** (REST endpoint for thumbnail variants),
+**T402792** (rate-limiting non-standard sizes).
+
 ## Official confirmation (not a fluke)
 
 - **T427465** — thumbnail caching moved from the upload cluster to text;
