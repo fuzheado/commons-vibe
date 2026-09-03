@@ -172,6 +172,13 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   return zero results server-side (T246568 degradation — observed live). The deep
   sampler's retry loop exists partly for this; check the search API directly before
   debugging the app.
+- **Thumbnail infra migration IN FLIGHT (T427465, FY26-27):** thumbs now served
+  from `thumb.wikimedia.org`, quantized upward to the standard size ladder
+  (250/330/500/960/1280/…) while `thumbwidth` reports the requested width; the old
+  `upload.wikimedia.org` host returns 400 for non-standard sizes. Behaviors may
+  keep shifting while T427465 rolls out per-wiki — if thumbs get "weird", check
+  `benchmark/thumb-metrics.md` (bucket ladder, timeline, official Phab refs)
+  before debugging the app.
 - **CORS-friendly helpers:** PagePile (`pagepile.toolforge.org` — host moved off
   wikimedia.cloud) and PetScan (`petscan.wmcloud.org`) both send
   `access-control-allow-origin: *`; the browser fetches them directly.
