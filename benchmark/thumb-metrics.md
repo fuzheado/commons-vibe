@@ -75,8 +75,17 @@ Browser srcset behavior verified: 284px slot, `sizes="294px"`, candidates
 | FY26-27 (Jul '26–Jun '27) | Umbrella task **T431141 "Evolve thumbnail infrastructure"** (Ladsgroup); **T427465 "Move thumbnail caching from upload cluster to text"** subtask — **In Progress**, staged per-wiki rollout | Phabricator |
 | ~Aug 2026 | Varnish VCL reconfigured for thumb serving on the text cluster (T435193) | SAL / gerrit |
 | 2026-08-27 | **T435979** TemplateStyles allow-lists thumb.wikimedia.org, deployed to production (gerrit 1329317) | SAL |
-| rolling | Per-wiki exposure of the new thumbnail endpoint (e.g. "Expose the new thumbnail endpoint on dewiki (T427465)"); **no public date for when commons.wikimedia.org flipped** — it landed somewhere between our 2026-09-02 session (old behavior observed) and the 2026-09-03 audit (new behavior) | production SAL |
-| 2026-09-03 | Noticed during the CommonsVibe image audit; fixed in v1.12 | this repo |
+| rolling | Per-wiki exposure of the new thumbnail endpoint (e.g. "Expose the new thumbnail endpoint on dewiki (T427465)"); commons.wikimedia.org flipped between our 2026-09-02 session (old behavior observed) and the 2026-09-03 audit | production SAL |
+| 2026-01-26 | **Tech News week 05 — early warning:** "Image thumbnails that are requested in non-standard sizes, and using non-standard methods such as direct requests to `upload.wikimedia.org/…` **will stop working in the near future**. This change is to prevent ongoing external abuse by web-scrapers and bots. ... **Tool-authors, will need to update their code to use standard thumbnail sizes.**" (diff.wikimedia.org/2026/01/26/tech-news-2026-week-05) | Tech News |
+| 2026-05-12 | Wikimedia Foundation Bulletin Issue 9: default thumbnail size preferences limited to 180/250/400px "to improve performance and reduce strain on thumbnail services" | Diff |
+| **2026-08-31** | **Tech News Issue 36 — the official domain-change announcement:** "The domain of URLs for thumbnails is changing from upload.wikimedia.org to thumb.wikimedia.org. The old URLs will continue to work for the foreseeable future but MediaWiki will advertise the new domain instead. URLs to other types of media such as original files, videos and transcodes will still be served from upload.wikimedia.org." (diff.wikimedia.org/2026/08/31/tech-news-2026-issue-36). Issue 36 also announces the **deepcat search fix** ("searching for pages by category using deepcat could return no results or unrelated results has now been fixed") — the very instability observed during our 09-02/03 testing | Tech News / Diff |
+| 2026-09-03 | Noticed during the CommonsVibe image audit — **3 days after the Issue 36 announcement**; fixed in v1.12 | this repo |
+
+**Public communications trail:** Tech News week 05 (Jan) warned tool-authors that
+non-standard sizes would stop working; Issue 36 (Aug 31) announced the domain
+change 3 days before we hit it. Old-domain URLs will "continue to work for the
+foreseeable future", but the API now advertises `thumb.wikimedia.org` and
+non-standard widths are the enforcement target (T402792).
 
 **Status: migration in flight.** T427465 is still In Progress under the FY26-27
 umbrella; expect thumb behavior (hosts, buckets, endpoints) to keep shifting.
