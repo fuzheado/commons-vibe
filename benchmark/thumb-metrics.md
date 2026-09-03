@@ -66,6 +66,25 @@ Sampled the first rendered tiles on the live feed (birds category, M density):
 Browser srcset behavior verified: 284px slot, `sizes="294px"`, candidates
 `500w + 960w` → **chose 500px** at DPR 1 (960w reserved for retina/L-density).
 
+## Official confirmation (not a fluke)
+
+- **T427465** — thumbnail caching moved from the upload cluster to text;
+  DNS commit `b9a19e3` introduced **thumb.wikimedia.org**
+- **T360589** — MediaWiki enforces `$wgThumbnailSteps = [20, 40, 60, 120, 250,
+  330, 500, 960, 1280, 1920, 3840]`
+- **T412971 / T414805** — standard sizes proposal + rollout (resolved)
+- **T388792** — official acknowledgment: the URL points at the nearest larger
+  standard size while `thumbwidth` still reports the requested width
+- **T402792** — rate-limiting non-standard thumbnail sizes under consideration
+  (arbitrary widths are a liability, not just wasteful)
+- **T66214** — "Existing thumb URLs are considered private, and are not
+  designed for use as a public API"
+
+Proof-of-behavior (curl, 2026-09-03): hand-constructed
+`upload.wikimedia.org/.../600px-` → **HTTP 400**; `500px-` and `330px-` → 200.
+`iiurlwidth=600` reports `thumbwidth: 600` but serves `/960px-`. The skills
+repo fix (Wikipedia-AI-Skills PR #26) documents this for future sessions.
+
 ## Re-running the benchmark
 
 ```bash
