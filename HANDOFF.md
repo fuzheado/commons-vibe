@@ -198,8 +198,10 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - `buildTreeLevel(cat)` — `cmtype=subcat` members + counts; the one tree primitive.
 - `fetchTreebar()` — fills the ↑ parents / ↳ subcats chip rows on every reset.
 - `openTreeModal()` / `loadTree()` / `renderTreeChildren()` / `treeRowEl()` — the
-  depth-N auto-expanding modal tree; `TREE_MAX_NODES = 300` caps runaway trees;
-  `treeReqId` (bumped by `resetAndFetch`) kills stale renders.
+  depth-N auto-expanding modal tree; `treeCap` (500, resumable via the "Load 500
+  more" button — cached categories replay instantly) bounds each render pass,
+  with a visited-set deduping cyclic DAG references; `treeReqId` (bumped by
+  `resetAndFetch`) kills stale renders. `?treecap=N` overrides for testing.
 - `handleTreeDeep()` / `handleDeepOff()` / `syncSortUI()` — deep mode plumbing.
 
 ### Roulette, type filter, list mode (v1.11)
@@ -357,11 +359,13 @@ fine for a snapshot feature, wrong for a live shuffle.
 Category-tree exploration — **Stage A + B core shipped in v1.6** (treebar, tree
 modal to depth 5, deep mode). Remaining:
 
-- **Stage B leftover:** leaf-category highlighting / dedupe against a visited set
-  (the Commons category graph is a DAG with cycles — the node cap handles runaway
-  traversal, but a visited-set would tighten it).
-- **Stage C:** multi-select union feeds, "category roulette" (random subcategory),
-  tree-aware URL state (`path=Root/A/B`) so back/forward walks the tree.
+- ~~**Stage B leftover:** visited-set dedupe~~ — **shipped** (the tree modal
+  dedupes cyclic DAG references and its node budget is resumable via "Load 500
+  more"). Still open from Stage B: leaf-category highlighting.
+- **Stage C:** multi-select union feeds, "category roulette" (~~random
+  subcategory~~ — **shipped** as the 🎲 chip), ~~tree-aware URL state
+  (`path=Root/A/B`) so back/forward walks the tree~~ — **shipped** in v1.9
+  (breadcrumb trail + pushState/popstate). Remaining: multi-select union feeds.
 
 Older roadmap (README): List/Snapshot mode via file IDs in URL, personal collections,
 accounts, natural-language search, filetype filtering.

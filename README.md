@@ -11,7 +11,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Use shuffle mode on a large category** with the "Detailed" setting to quickly explore the variety of a category.
 * **Dial the tile density** with the S/M/L control — from a 6-column wall of thumbnails down to big single-column previews — and the grid reflows instantly.
 * **Jump to different categories** by selecting the image's "tag" button to bring up Commons categories you can click on, visible or hidden.
-* **Browse the category tree** via the tree button (👥): see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories.
+* **Browse the category tree** via the sitemap button: see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories. Big trees load 500 at a time with a "Load more" extension — cyclic cross-listings are deduped.
 * **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.
 * **Shareable tree views:** `&tree=1&depth=N` boots with the tree modal open at your chosen depth.
 * **Quickly scrub and play video** by visiting a category of WebM videos and hovering your pointer over a tile to preview it without sound. (On mobile, tapping a tile opens the file page on Commons.)
@@ -50,7 +50,7 @@ The entire state of your browser is captured in the URL.
 CommonsVibe supports distinct ways to interact with media:
 
 1.  **Alphabetical Mode:** The classic organized approach. Browse through a category's contents in order, with 12 tiles loaded at a time as you scroll.
-2.  **Shuffle Mode:** For true serendipity. Using Wikimedia's *CirrusSearch*, this mode pulls 12 random tiles from a category, then another 12, and another, creating a unique, never-ending discovery session.
+2.  **Shuffle Mode:** For true serendipity. Using Wikimedia's *CirrusSearch*, this mode pulls 12 random tiles at a time from never-repeating draws, creating a unique, never-ending discovery session. **Deep mode** extends this across a whole subtree: each batch draws from several distinct subcategories (weighted by size), so no single subject floods the screen. The media-type filter applies server-side here.
 
 Both modes work in **Detailed** (filename + 3-line description) and **Minimal** (edge-to-edge images, metadata on hover) views.
 
