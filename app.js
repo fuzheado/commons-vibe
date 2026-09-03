@@ -27,7 +27,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.10 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.12 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -490,7 +490,7 @@ async function listBatch() {
     cllimit: "max",
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
     viprop: "url|derivatives",
-    iiurlwidth: "600",
+    iiurlwidth: "480",
   });
   // Restore the list's own order (imageinfo responses are pageid-ordered).
   const byTitle = new Map(((info.query && info.query.pages) || []).map((p) => [normCat(p.title), p]));
@@ -690,7 +690,7 @@ async function fetchBatch() {
         cllimit: "max",
         iiprop: "url|extmetadata|derivatives|mediatype|mime",
         viprop: "url|derivatives",
-        iiurlwidth: "600",
+        iiurlwidth: "480",
       });
       pages = (info.query && info.query.pages) || [];
       shuffle(pages);
@@ -710,7 +710,7 @@ async function fetchBatch() {
     cllimit: "max",
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
     viprop: "url|derivatives",
-    iiurlwidth: "600",
+    iiurlwidth: "480",
   };
   if (state.continueToken) Object.assign(params, state.continueToken);
   const data = await api(params, { ttl: 24 * 3600e3 });
@@ -770,12 +770,29 @@ function pickBestVideo(fileUrl, derivatives) {
 }
 
 // Derive a 2x variant from the 600px thumb URL for retina screens — zero extra API calls.
-function srcsetFor(thumbUrl) {
-  const m = /\/\d+px-/.exec(thumbUrl);
-  if (!m) return "";
-  const w = parseInt(m[0].slice(1), 10);
-  const retina = thumbUrl.replace(m[0], `/${w * 2}px-`);
-  return `${thumbUrl} 1x, ${retina} 2x`;
+// Approximate on-screen width of a masonry tile for the current layout.
+function slotWidthPx() {
+  const vw = Math.min(window.innerWidth, 1280); // max-w-7xl container
+  const cols = (SIZE_COLS[state.size] || SIZE_COLS.m)[breakpointTier()];
+  const gaps = (cols - 1) * 24; // gap-6 between columns
+  return Math.max(160, Math.round((vw - 32 - gaps) / cols));
+}
+
+// Build a width-descriptor srcset + sizes pair. thumb.wikimedia.org quantizes
+// requested widths upward to a pre-rendered bucket ladder (330/500/960/1280...)
+// while thumbwidth reports the REQUESTED width — so parse the served width from
+// the URL and declare that. responsiveUrls (from imageinfo, when present)
+// supplies the API-sanctioned hiDPI candidate instead of string surgery.
+function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
+  const m = /\/(\d+)px-[^/]*$/.exec(thumbUrl);
+  if (!m) return { srcset: "", sizes: "" };
+  const entries = [`${thumbUrl} ${m[1]}w`];
+  for (const key of Object.keys(responsiveUrls || {})) {
+    const u = cleanUrl(responsiveUrls[key]);
+    const rm = /\/(\d+)px-[^/]*$/.exec(u);
+    if (rm && rm[1] !== m[1]) entries.push(`${u} ${rm[1]}w`);
+  }
+  return { srcset: entries.join(", "), sizes: `${slotPx}px` };
 }
 
 /* ---------------- tile layout (size setting + reflow) ---------------- */
@@ -905,6 +922,8 @@ function buildCard(page) {
   const thumbUrl = cleanUrl(info.thumburl || "");
   const tw = info.thumbwidth || 16;
   const th = info.thumbheight || 9;
+  const { srcset, sizes } = srcsetFor(thumbUrl, slotWidthPx(), info.responsiveUrls);
+  const srcsetAttr = srcset ? `srcset="${esc(srcset)}" sizes="${esc(sizes)}"` : "";
 
   let catHtml = "";
   if (page.categories) {
@@ -927,7 +946,7 @@ function buildCard(page) {
     mediaHtml = `
       <div class="relative w-full overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}">
         <div class="absolute inset-0 flex items-center justify-center opacity-20 media-placeholder"><svg class="w-12 h-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg></div>
-        <img src="${esc(thumbUrl)}" srcset="${esc(srcsetFor(thumbUrl))}" class="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-0 thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
+        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-0 thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
         <video src="${esc(mediaSrc)}" class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 group-hover:opacity-100 media-element" muted loop playsinline preload="none"></video>
       </div>`;
   } else if (isAudio) {
@@ -941,7 +960,7 @@ function buildCard(page) {
   } else {
     mediaHtml = `
       <div class="relative overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}">
-        <img src="${esc(thumbUrl)}" srcset="${esc(srcsetFor(thumbUrl))}" class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" decoding="async">
+        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" decoding="async">
       </div>`;
   }
 
