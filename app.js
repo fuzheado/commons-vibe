@@ -429,12 +429,17 @@ function setType(t) {
 // survive resetAndFetch (the roulette's own navigateTo resets state), so it
 // is deliberately NOT cleared there.
 const ROULETTE_MEMORY = 3; // spins a just-visited subcategory stays suppressed
+const ROULETTE_MIN_POOL = 4; // hide the dice below this — see fetchTreebar
+// The dice only spins file-bearing subcats (uniform fallback when all are
+// empty). Shared by fetchTreebar's visibility gate and categoryRoulette so
+// the button can never appear for a pool it couldn't meaningfully spin.
+const roulettePool = (rows) =>
+  rows.some((r) => r.files > 0) ? rows.filter((r) => r.files > 0) : rows;
 async function categoryRoulette() {
   if (state.list || !state.currentCategory) return;
   try {
     const rows = await buildTreeLevel(state.currentCategory);
-    const withFiles = rows.filter((r) => r.files > 0);
-    let pool = withFiles.length ? withFiles : rows;
+    let pool = roulettePool(rows);
     if (!pool.length) {
       window.alert("No subcategories to spin through here.");
       return;
@@ -1163,7 +1168,11 @@ async function fetchTreebar() {
       sEl.appendChild(more);
     }
     // Category roulette — random subcategory, weighted by file count.
-    if (rows.length) {
+    // Hidden when the spin pool is under ROULETTE_MIN_POOL (4): with ≤3
+    // options the treebar chips already show every choice, and the
+    // anti-repeat window (3) can't engage, so the dice would just replay
+    // the same few landings.
+    if (roulettePool(rows).length >= ROULETTE_MIN_POOL) {
       const dice = document.createElement("button");
       dice.className = "cat-pill px-2 py-1 rounded-full text-[9px] font-bold bg-purple-700 text-white hover:bg-purple-500 transition-colors";
       dice.textContent = "🎲 Roulette";

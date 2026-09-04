@@ -111,7 +111,9 @@ python3 -m http.server 8123        # any static server works; no build step
     with `path=` boots with the trail intact; an empty category shows "End of
     Collection" instead of an error.
 16. Roulette: 🎲 chip ends the subcategory chip row; each spin lands on a
-    subcategory that has files; trail + Back/Forward integrate.
+    subcategory that has files; trail + Back/Forward integrate. The dice is
+    hidden entirely below 4 subcats (e.g. Featured pictures on Wikimedia
+    Commons — its single "vector" subcat shows as a chip, no dice).
 17. Type filter: header select — Images/Video/Audio filter the feed (shuffle
     filters server-side; alpha client-side); `type=` round-trips; "All Media"
     restores.
@@ -249,6 +251,12 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   `resetAndFetch` on purpose (the roulette's own navigateTo resets state).
   Reported as a bug once (3 repeats in 6 spins on that category) — weighting
   math made it a ~9% event, but the exclusion window now makes it impossible.
+  **Visibility gate (2026-09-04):** the dice renders only when
+  `roulettePool(rows).length >= ROULETTE_MIN_POOL` (4) — with ≤3 subcats the
+  chips already show every option, and the anti-repeat window (3) cannot
+  engage, so the dice would just replay the same few landings. The pool
+  helper is shared with `categoryRoulette`, so the gate and the spin always
+  agree on what a spin would pick from.
 - **Type filter:** header `type-select` (All/Images/Video/Audio). `pageKind()`
   classifies from `mediatype`/`mime` (now requested explicitly —
   `iiprop=url|extmetadata|derivatives` OVERRIDES API defaults and omits them;
