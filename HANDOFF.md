@@ -9,9 +9,13 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-09-02, v1.11 deployed)
+## Current state (updated 2026-09-04, v1.11 deployed)
 
-- **Deployed:** live site matches `main` (PRs #4–#7 merged and verified via SHA256).
+- **Deployed:** live site matches `main` (verified via SHA256).
+- **2026-09-04 — payload optimization:** all three fetch paths (alpha, shuffle,
+  list) now send `iiextmetadatafilter=ImageDescription|ObjectName` — the only
+  extmetadata fields the app reads — cutting each 12-tile batch ~3×
+  (33→16 KB raw images, 63→39 KB video; smaller localStorage cache entries too).
 - **Engine:** Vanilla JS ES module (`app.js`). The PyScript/Pyodide 2026.1.1 build was
   fully replaced (commit `77a3e93`) — the app is DOM/API glue, and the ~10 MB WASM
   runtime was pure overhead. **Do not reintroduce PyScript.**
@@ -166,6 +170,11 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **iiprop overrides defaults:** specifying `iiprop=url|extmetadata|derivatives`
   silently DROPS `mediatype`/`mime` (they're default props). Request them
   explicitly when classifying pages.
+- **extmetadata is trimmed on purpose:** the three batch calls send
+  `iiextmetadatafilter=ImageDescription|ObjectName` (only what buildCard's
+  description reads). If a feature needs more metadata (Artist,
+  LicenseShortName, …), widen the filter — don't remove it, or every batch
+  carries multi-KB unused metadata again.
 - **Empty generator results:** a generator query with zero matches returns
   `{batchcomplete:true}` with no `query` node — guard `(data.query && data.query.pages)`.
 - **CirrusSearch keyword instability:** `incategory:`/`deepcategory:` intermittently

@@ -489,6 +489,7 @@ async function listBatch() {
     clprop: "hidden",
     cllimit: "max",
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
     iiurlwidth: "480",
   });
@@ -689,6 +690,7 @@ async function fetchBatch() {
         clprop: "hidden",
         cllimit: "max",
         iiprop: "url|extmetadata|derivatives|mediatype|mime",
+        iiextmetadatafilter: "ImageDescription|ObjectName",
         viprop: "url|derivatives",
         iiurlwidth: "480",
       });
@@ -709,6 +711,7 @@ async function fetchBatch() {
     clprop: "hidden",
     cllimit: "max",
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
     iiurlwidth: "480",
   };
