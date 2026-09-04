@@ -1217,6 +1217,8 @@ function closeTreeModal() {
 async function openTreeModal() {
   state.treeOpen = true;
   $("tree-depth").value = String(state.treeDepth);
+  $("tree-filter").value = ""; // fresh view each open
+  $("tree-filter-count").classList.add("hidden");
   $("tree-modal").classList.remove("hidden");
   updateURL();
   loadTree();
@@ -1261,6 +1263,7 @@ async function loadTree() {
   await renderTreeChildren(kidsEl, rootCat, depth, ctx, 1);
   if (reqId !== treeReqId) return;
   updateTreeStatus(ctx);
+  applyTreeFilter(); // re-apply any typed filter to the rebuilt tree
 }
 
 function updateTreeStatus(ctx) {
@@ -1286,6 +1289,55 @@ function updateTreeStatus(ctx) {
   } else if (more) {
     more.remove();
   }
+}
+
+/* Tree-modal type-to-filter: client-side, operates on loaded rows only
+ * (≤ treeCap). Queries normalize through normCat (underscore/space safe,
+ * case-insensitive). A node stays visible if its own name matches OR any
+ * loaded descendant matches; visible nodes with loaded children are
+ * force-expanded so a match can't hide behind a collapsed branch. Clearing
+ * the input restores every row (expansion state stays as-is). The count
+ * span reports matches within the loaded set — a tree truncated at treeCap
+ * can only filter what it has. */
+let treeFilterTimer = null;
+function applyTreeFilter() {
+  const q = normCat($("tree-filter").value).trim();
+  const countEl = $("tree-filter-count");
+  const content = $("tree-content");
+  if (!q) {
+    countEl.classList.add("hidden");
+    for (const node of content.querySelectorAll(".tree-node")) node.style.display = "";
+    return;
+  }
+  let matches = 0, total = 0;
+  const walk = (container) => {
+    let anyVisible = false;
+    for (const child of container.children) {
+      // Wrapper divs (top-level list, .tree-children, root header) — recurse.
+      if (!child.classList.contains("tree-node")) {
+        anyVisible = walk(child) || anyVisible;
+        continue;
+      }
+      total++;
+      const nameEl = child.querySelector(":scope > .tree-row > .tree-name");
+      const kidsEl = child.querySelector(":scope > .tree-children");
+      const childHit = kidsEl ? walk(kidsEl) : false;
+      const selfHit = !!nameEl && normCat(nameEl.textContent).includes(q);
+      if (selfHit) matches++;
+      const keep = selfHit || childHit;
+      child.style.display = keep ? "" : "none";
+      if (keep && kidsEl && kidsEl.children.length && kidsEl.classList.contains("hidden")) {
+        kidsEl.classList.remove("hidden");
+        const tog = child.querySelector(":scope > .tree-row > .tree-toggle");
+        if (tog) tog.textContent = "▾";
+      }
+      anyVisible = anyVisible || keep;
+    }
+    return anyVisible;
+  };
+  walk(content);
+  countEl.textContent = `${matches} match${matches === 1 ? "" : "es"} · of ${total} loaded`;
+  countEl.classList.remove("hidden");
 }
 
 // Render `levels` levels of children of catTitle into container, auto-expanding
@@ -1325,7 +1377,7 @@ function treeRowEl(row, depth, ctx, autoLevels = 0) {
   rowEl.style.width = `calc(100% - ${depth * 14}px)`;
 
   const toggleBtn = document.createElement("button");
-  toggleBtn.className = "w-4 h-4 flex items-center justify-center text-zinc-500 hover:text-white text-[10px] shrink-0";
+  toggleBtn.className = "tree-toggle w-4 h-4 flex items-center justify-center text-zinc-500 hover:text-white text-[10px] shrink-0";
   const hasKids = row.subcats > 0;
   toggleBtn.textContent = hasKids ? "▸" : "·";
   if (!hasKids) toggleBtn.classList.add("opacity-30", "pointer-events-none");
@@ -1688,6 +1740,17 @@ async function init() {
   $("tree-close").addEventListener("click", closeTreeModal);
   $("tree-depth").addEventListener("change", handleDepthChange);
   $("tree-deep-btn").addEventListener("click", handleTreeDeep);
+  $("tree-filter").addEventListener("input", () => {
+    clearTimeout(treeFilterTimer);
+    treeFilterTimer = setTimeout(applyTreeFilter, 120);
+  });
+  $("tree-filter").addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      e.stopPropagation();
+      e.target.value = "";
+      applyTreeFilter();
+    }
+  });
   $("about-btn").addEventListener("click", () => {
     $("about-modal").classList.remove("hidden");
   });

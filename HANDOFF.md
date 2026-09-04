@@ -119,6 +119,12 @@ python3 -m http.server 8123        # any static server works; no build step
     as a feed — dropdown shows the list label, sort pill hidden, size/view/type
     still work; clicking a tile's category pill exits list mode into that
     category.
+19. Tree filter: typing in the modal's filter box narrows the list as you type
+    (case/underscore-insensitive substring); matches keep their ancestor chain
+    visible and collapsed branches holding matches auto-expand; the count line
+    shows "N matches · of M loaded"; Escape clears; clicking a filtered row
+    navigates and closes the modal; reopening starts unfiltered; depth change
+    and "Load 500 more" preserve the filter (re-applied after rebuild).
 
 ## Deploy to Toolforge
 
@@ -218,6 +224,16 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   more" button — cached categories replay instantly) bounds each render pass,
   with a visited-set deduping cyclic DAG references; `treeReqId` (bumped by
   `resetAndFetch`) kills stale renders. `?treecap=N` overrides for testing.
+  **Type-to-filter (2026-09-04):** `#tree-filter` input in the modal header;
+  `applyTreeFilter()` walks the loaded `.tree-node` DOM (120ms debounce,
+  normCat-normalized substring match), keeps matches plus their ancestor chain,
+  force-expands collapsed branches that hold matches, and reports
+  "N matches · of M loaded" in `#tree-filter-count` — client-side only, no API
+  calls, so it filters loaded rows (≤ treeCap) only. Escape clears; reopening
+  the modal starts unfiltered; `loadTree()` re-applies the filter after depth
+  changes and "Load 500 more". Note: `.tree-node`s are NOT direct children of
+  `#tree-content` — they nest inside wrapper divs; the walker recurses through
+  any non-node child.
 - `handleTreeDeep()` / `handleDeepOff()` / `syncSortUI()` — deep mode plumbing.
 
 ### Roulette, type filter, list mode (v1.11)

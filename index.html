@@ -58,6 +58,11 @@
                 <span id="tree-status" class="text-[10px] font-mono text-blue-500 font-black"></span>
             </div>
             <p class="px-6 pb-1 text-[9px] text-zinc-600 font-bold uppercase tracking-widest">Deep shuffle draws tiles from every subcategory below — a Deep chip appears in the header while it's on.</p>
+            <div class="px-6 pb-2 flex items-center gap-2">
+                <input id="tree-filter" type="text" placeholder="Filter categories…" autocomplete="off" spellcheck="false"
+                    class="flex-1 bg-zinc-900 border border-zinc-800 rounded-lg px-3 py-1.5 text-xs text-zinc-200 placeholder-zinc-600 outline-none focus:border-blue-600" />
+                <span id="tree-filter-count" class="text-[10px] font-mono text-blue-500 font-black hidden shrink-0"></span>
+            </div>
             <div id="tree-content" class="px-4 pb-6 pt-2 overflow-y-auto flex-1 text-sm"></div>
         </div>
     </div>
