@@ -396,6 +396,14 @@ modal to depth 5, deep mode). Remaining:
   subcategory~~ — **shipped** as the 🎲 chip), ~~tree-aware URL state
   (`path=Root/A/B`) so back/forward walks the tree~~ — **shipped** in v1.9
   (breadcrumb trail + pushState/popstate). Remaining: multi-select union feeds.
+- **Banked (2026-09-04): treebar/roulette count laziness.** The treebar and
+  roulette both draw on `buildTreeLevel()`, which fetches categoryinfo for ALL
+  subcategories (9 batched calls for a 407-subcat category) before the 14
+  chips can render. Fine when api.php is healthy, but during the 2026-09-04
+  congestion event (TTFB 2–21s) this dominated cold visits to big categories.
+  Idea: render chips immediately from `list=categorymembers`, stream counts in
+  the background, and let the roulette fetch full counts on demand (it already
+  awaits `buildTreeLevel` directly, so it is unaffected by chip-level changes).
 
 Older roadmap (README): List/Snapshot mode via file IDs in URL, personal collections,
 accounts, natural-language search, filetype filtering.
