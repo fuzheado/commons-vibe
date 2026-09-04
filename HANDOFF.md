@@ -210,6 +210,15 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **CORS-friendly helpers:** PagePile (`pagepile.toolforge.org` — host moved off
   wikimedia.cloud) and PetScan (`petscan.wmcloud.org`) both send
   `access-control-allow-origin: *`; the browser fetches them directly.
+- **Browser fetches stay header-free (do not "fix" this):** `api()` sends NO
+  custom headers — a header-free GET is a CORS *simple request* (no preflight,
+  works in every engine). Browsers cannot set `User-Agent`; `Api-User-Agent`
+  would force an OPTIONS preflight before every api.php call (double requests,
+  extra latency under congestion). Per the wikimedia-api-access skill's
+  preflight-trap guidance (verified 2026-09-03), that is the correct trade for
+  browser apps. Only `loadList()` sets `Api-User-Agent` — PetScan/PagePile are
+  preflight-verified to allow it. If traffic identification at WMF ever
+  becomes a requirement, the answer is a server-side proxy, not fetch headers.
 
 ## Code map (`app.js`)
 
