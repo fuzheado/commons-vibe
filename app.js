@@ -44,6 +44,7 @@ const state = {
   size: "m",                     // tile density s|m|l (URL param size=)
   type: "all",                   // media filter all|image|video|audio (URL param type=)
   lastDeepPicks: new Set(),      // categories used by the previous deep batch
+  lastRoulettePicks: [],         // recent roulette landings (anti-repeat; NOT reset per category)
   list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   items: [],                     // placed cards in fetch order (reflow source)
@@ -421,15 +422,28 @@ function setType(t) {
 
 // Jump to a random subcategory, weighted by direct file count so the dice
 // never land on an empty branch (falls back to uniform when all are empty).
+// File-count weighting means a dominant subcategory (one museum can hold ~20%
+// of a tree's files) comes up every ~5 spins, which reads as "not random".
+// The last few landings are therefore excluded while enough options remain —
+// same philosophy as the deep sampler's lastDeepPicks. This memory must
+// survive resetAndFetch (the roulette's own navigateTo resets state), so it
+// is deliberately NOT cleared there.
+const ROULETTE_MEMORY = 3; // spins a just-visited subcategory stays suppressed
 async function categoryRoulette() {
   if (state.list || !state.currentCategory) return;
   try {
     const rows = await buildTreeLevel(state.currentCategory);
     const withFiles = rows.filter((r) => r.files > 0);
-    const pool = withFiles.length ? withFiles : rows;
+    let pool = withFiles.length ? withFiles : rows;
     if (!pool.length) {
       window.alert("No subcategories to spin through here.");
       return;
+    }
+    // Anti-repeat: drop recently landed subcats while ≥4 options remain.
+    const recent = new Set(state.lastRoulettePicks);
+    if (recent.size) {
+      const fresh = pool.filter((r) => !recent.has(normCat(r.title)));
+      if (fresh.length >= 4) pool = fresh;
     }
     const total = pool.reduce((s, r) => s + Math.max(r.files, 1), 0);
     let r = Math.random() * total;
@@ -438,6 +452,8 @@ async function categoryRoulette() {
       r -= Math.max(row.files, 1);
       if (r <= 0) { pick = row; break; }
     }
+    state.lastRoulettePicks.unshift(normCat(pick.title));
+    state.lastRoulettePicks = state.lastRoulettePicks.slice(0, ROULETTE_MEMORY);
     navigateTo(pick.title);
   } catch (e) {
     console.error("roulette failed:", e);

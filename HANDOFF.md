@@ -225,7 +225,14 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **Roulette:** 🎲 chip at the end of the treebar's subcategory row;
   `categoryRoulette()` picks a random subcategory **weighted by direct file
   count** (never lands on an empty branch; uniform fallback), via `navigateTo`
-  so the trail/history integrate.
+  so the trail/history integrate. **Anti-repeat (2026-09-04):** the last 3
+  landings (`state.lastRoulettePicks`, normCat-keyed) are excluded while ≥4
+  pool options remain — file-count weighting lets one dominant subcat (e.g.
+  Yale Center for British Art at ~20% of "GAP works by collection") land
+  every ~5 spins, which reads as non-random. The memory survives
+  `resetAndFetch` on purpose (the roulette's own navigateTo resets state).
+  Reported as a bug once (3 repeats in 6 spins on that category) — weighting
+  math made it a ~9% event, but the exclusion window now makes it impossible.
 - **Type filter:** header `type-select` (All/Images/Video/Audio). `pageKind()`
   classifies from `mediatype`/`mime` (now requested explicitly —
   `iiprop=url|extmetadata|derivatives` OVERRIDES API defaults and omits them;
