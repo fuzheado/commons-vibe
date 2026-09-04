@@ -85,6 +85,8 @@ python3 -m http.server 8123        # any static server works; no build step
 4. Editor (✏️ button) → Save with no changes closes cleanly; invalid category shows
    the red error box; valid new category persists.
 5. Shuffle toggle → purple knob, `sort=shuffle` in URL, random batches on scroll.
+   Also shuffle a quote-containing category (e.g. the Albert-Kahn mission
+   `"1923 - Suisse Allemande…"` autochromes) — it must render.
 6. Minimal/Detailed toggle → `view=min|det`, overlay vs. flowing metadata.
 7. Tag button → drawer with pills; hidden categories = ghost pills; pill click teleports
    and adds category to config.
@@ -189,6 +191,15 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   return zero results server-side (T246568 degradation — observed live). The deep
   sampler's retry loop exists partly for this; check the search API directly before
   debugging the app.
+- **Quote-escape category names in search keywords (fixed 2026-09-04):** category
+  titles may contain `"` (Albert-Kahn autochrome missions use quoted date ranges).
+  A raw `incategory:"…mission "1923…""` terminates the CirrusSearch string early
+  and silently returns zero results FOREVER — while `categoryinfo` still reports
+  the files, so the count badge shows 198 over an empty feed. All three keyword
+  construction sites (`flatSampleTitles`, the deep-fallback `deepcategory:`, the
+  deep per-pick `incategory:`) now route names through `escQ()` (`"` → `\"`),
+  which CirrusSearch honors. Alpha mode was never affected (it uses
+  `generator=categorymembers`, not Cirrus).
 - **Thumbnail infra migration IN FLIGHT (T427465, FY26-27):** thumbs now served
   from `thumb.wikimedia.org`, quantized upward to the standard size ladder
   (250/330/500/960/1280/…) while `thumbwidth` reports the requested width; the old

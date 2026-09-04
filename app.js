@@ -549,8 +549,12 @@ function pickNewTitles(results, limit = 12) {
 }
 
 // Random draw from a single category — exact (no caps, no depth expansion).
+// escQ: category names may contain double quotes (e.g. Albert-Kahn mission
+// "1923 - Suisse Allemande...") — an unescaped quote terminates the
+// CirrusSearch string early and the draw silently returns zero forever.
+const escQ = (s) => s.replace(/"/g, '\\"');
 async function flatSampleTitles() {
-  const catName = state.currentCategory.replace(/^Category:/, "").replace(/_/g, " ");
+  const catName = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
   const search = await api({
     action: "query",
     list: "search",
@@ -620,7 +624,7 @@ const DEEP_DRAW_LIMIT = 6;   // random files fetched per chosen category
 
 async function deepSampleTitles() {
   const fallbackDraw = async () => {
-    const catName = state.currentCategory.replace(/^Category:/, "").replace(/_/g, " ");
+    const catName = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
     const search = await api({
       action: "query",
       list: "search",
@@ -685,7 +689,7 @@ async function drawSpread(weighted, exclude) {
     api({
       action: "query",
       list: "search",
-      srsearch: `incategory:"${p.title.replace(/^Category:/, "").replace(/_/g, " ")}"${typeTerm}`,
+      srsearch: `incategory:"${escQ(p.title.replace(/^Category:/, "").replace(/_/g, " "))}"${typeTerm}`,
       srnamespace: "6",
       srlimit: String(DEEP_DRAW_LIMIT),
       srsort: "random",
