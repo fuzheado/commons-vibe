@@ -353,6 +353,13 @@ fine for a snapshot feature, wrong for a live shuffle.
    testing, `incategory:`/`deepcategory:` intermittently returned zero results
    (T246568 degradation). Client code is correct; if shuffle suddenly returns
    nothing, check the search API directly before debugging the app.
+   Observed 2026-09-04: `incategory:"Featured pictures of birds"` drew only
+   3 results per `srlimit=50` request — with AND without `srsort=random` —
+   while other categories (Quality images from WikiPortraits, PotY 2024)
+   returned full 50s at the same moment. So the per-category index can be
+   truncated, not just emptied; shuffle degrades to tiny batches from that
+   category until the index heals. Diagnose with a direct search-API probe
+   (±`srsort=random`, several categories) before touching app code.
 
 1. **Server git checkout is stale** — `/data/project/commons-vibe/public_html/.git` is an
    orphaned March checkout (FETCH_HEAD `f3e0b71`; HEAD on a dead `master` ref).
