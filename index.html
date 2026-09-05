@@ -134,9 +134,9 @@
 
                 <div class="flex gap-4 border-l border-zinc-800 pl-4">
                     <div id="size-toggle" class="flex items-center gap-1 bg-zinc-900/50 p-1 px-2 rounded-full border border-zinc-800" title="Tile size">
-                        <button data-size="s" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">S</button>
-                        <button data-size="m" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">M</button>
-                        <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white">L</button>
+                        <button data-size="s" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white" title="Small tiles (up to 6 columns)">S</button>
+                        <button data-size="m" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white" title="Medium tiles (up to 4 columns)">M</button>
+                        <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white" title="Large tiles (up to 3 columns)">L</button>
                     </div>
                     <select id="type-select" class="bg-zinc-900/50 text-[9px] font-bold uppercase tracking-widest text-zinc-300 border border-zinc-800 rounded-full px-2.5 py-2 outline-none focus:border-blue-600 cursor-pointer" title="Filter by media type">
                         <option value="all">All Media</option>
@@ -145,11 +145,11 @@
                         <option value="audio">Audio</option>
                     </select>
                     <div id="sort-pill" class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
-                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Alpha</span>
-                        <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner">
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold" title="Alphabetical order (A-Z by file name)">Alpha</span>
+                        <button id="sort-toggle" class="w-10 h-5 bg-zinc-700 rounded-full relative toggle-transition shadow-inner" title="Toggle between alphabetical and shuffle order">
                             <div id="sort-knob" class="absolute top-1 left-1 w-3 h-3 bg-white rounded-full toggle-transition"></div>
                         </button>
-                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Shuffle</span>
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold" title="Random order - 12 never-repeating tiles per draw">Shuffle</span>
                         <button id="deep-chip" class="hidden text-[9px] font-black uppercase tracking-widest bg-purple-600 hover:bg-purple-500 text-white rounded-full px-2.5 py-1 transition-colors shadow" title="Deep shuffle is ON — the feed samples this category and all its subcategories. Click to turn off.">Deep ✓</button>
                     </div>
                     <button id="refresh-btn" class="p-1.5 bg-zinc-900/50 hover:bg-blue-600 rounded-full text-zinc-400 hover:text-white transition-all shadow-lg border border-zinc-800" title="Re-shuffle / Refresh">
@@ -158,11 +158,11 @@
                         </svg>
                     </button>
                     <div class="flex items-center gap-3 bg-zinc-900/50 p-1 px-3 rounded-full border border-zinc-800">
-                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold">Min</span>
-                        <button id="view-toggle" class="w-10 h-5 bg-blue-600 rounded-full relative toggle-transition shadow-inner">
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-500 font-bold" title="Minimal view: edge-to-edge images, details on hover">Min</span>
+                        <button id="view-toggle" class="w-10 h-5 bg-blue-600 rounded-full relative toggle-transition shadow-inner" title="Toggle between minimal and detailed view">
                             <div id="view-knob" class="absolute top-1 left-6 w-3 h-3 bg-white rounded-full toggle-transition"></div>
                         </button>
-                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold">Det</span>
+                        <span class="text-[9px] uppercase tracking-widest text-zinc-400 font-bold" title="Detailed view: filename and description under each tile">Det</span>
                     </div>
                 </div>
             </div>
