@@ -16,6 +16,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Shareable tree views:** `&tree=1&depth=N` boots with the tree modal open at your chosen depth.
 * **Quickly scrub and play video** by visiting a category of WebM videos and hovering your pointer over a tile to preview it without sound. (On mobile, tapping a tile opens the file page on Commons.)
 * **Spin the 🎲 roulette** to hop into a random subcategory, and **filter by media type** (images / video / audio) from the header.
+* **Spin 3D models in place** — STL tiles render an interactive WebGL viewer on hover: drag to spin (yaw/pitch), wheel to zoom, auto-rotating until you grab it. Posters stay until you hover, bytes load on intent, and files too big to spin (40MB+) keep their thumbnail.
 * **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed.
 
 ## **A running version can be found at: https://commons-vibe.toolforge.org/**

@@ -823,6 +823,191 @@ function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
   return { srcset: entries.join(", "), sizes: `${slotPx}px` };
 }
 
+/* ---------------- 3D STL viewer (hover-to-spin) ---------------- */
+// Interactive 3D for application/sla (STL) tiles. Server-rendered thumbs stay
+// as posters; hovering lazily imports the vendored three.js (MIT, vendor/ —
+// Toolforge CSP blocks CDN imports, so the ESM files ship same-origin; the
+// inline import map in index.html resolves OrbitControls' bare "three"),
+// fetches the STL bytes (upload.wikimedia.org sends CORS * on file bytes —
+// verified 2026-09-04, unlike the no-CORS row in the skills table), parses
+// binary STL, and spins an OrbitControls rig with auto-rotate until the user
+// grabs it. Dispose on leave. Bytes are cached per URL — re-hover is instant.
+const STL_MAX_BYTES = 40e6; // megabyte monsters keep the poster
+const STL_FETCH_TIMEOUT = 20000; // congested upload servers must fail fast
+const stlRegistry = new Map();   // card el → {controls, renderer, camera, ...}
+const stlBytesCache = new Map(); // cleanUrl → ArrayBuffer
+
+// Test hook (tests/stl.spec.js asserts camera moves + dispose) — the app
+// itself never reads window.__cvStl.
+if (typeof window !== "undefined") {
+  window.__cvStl = { registry: stlRegistry, bytesCache: stlBytesCache };
+}
+
+let stlLibPromise = null;
+async function ensureStlLib() {
+  if (!stlLibPromise) {
+    stlLibPromise = Promise.all([
+      import("three"),
+      import("./vendor/OrbitControls.js"),
+    ]).then(([THREE, OC]) => ({ THREE, OrbitControls: OC.OrbitControls }));
+  }
+  return stlLibPromise;
+}
+
+// Binary STL parser — 80-byte header, uint32 triangle count, 50 bytes per
+// facet (normal + 3 vertices + uint16). Returns null for anything else
+// (ASCII STL, truncated files) — callers keep the poster thumbnail.
+function parseBinaryStl(buffer) {
+  if (buffer.byteLength < 84) return null;
+  const view = new DataView(buffer);
+  const count = view.getUint32(80, true);
+  if (count === 0 || 84 + count * 50 !== buffer.byteLength) return null;
+  const positions = new Float32Array(count * 9);
+  const normals = new Float32Array(count * 9);
+  for (let i = 0; i < count; i++) {
+    const o = 84 + i * 50;
+    const nx = view.getFloat32(o, true);
+    const ny = view.getFloat32(o + 4, true);
+    const nz = view.getFloat32(o + 8, true);
+    for (let v = 0; v < 3; v++) {
+      const vo = o + 12 + v * 12;
+      const pi = i * 9 + v * 3;
+      positions[pi] = view.getFloat32(vo, true);
+      positions[pi + 1] = view.getFloat32(vo + 4, true);
+      positions[pi + 2] = view.getFloat32(vo + 8, true);
+      normals[pi] = nx;
+      normals[pi + 1] = ny;
+      normals[pi + 2] = nz;
+    }
+  }
+  return { positions, normals };
+}
+
+async function activateStl(card, mediaBox, url) {
+  const entry = { controls: null, renderer: null, camera: null, disposed: false };
+  stlRegistry.set(card, entry);
+  const dead = () => stlRegistry.get(card) !== entry;
+  const loader = mediaBox.querySelector(".stl-loading");
+  const poster = mediaBox.querySelector("img.thumb-img");
+  try {
+    loader && loader.classList.remove("hidden");
+    const [{ THREE, OrbitControls }, buffer] = await Promise.all([
+      ensureStlLib(),
+      (async () => {
+        if (!stlBytesCache.has(url)) {
+          const resp = await fetch(url, {
+            signal: AbortSignal.any([state.abort.signal, AbortSignal.timeout(STL_FETCH_TIMEOUT)]),
+          });
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          // Pre-read cap via Content-Length (CORS-exposed) — don't download
+          // 100MB just to throw. Post-read check covers chunked responses.
+          const len = parseInt(resp.headers.get("content-length") || "0", 10);
+          if (len > STL_MAX_BYTES) {
+            throw new Error(`STL too large (${(len / 1e6).toFixed(1)} MB)`);
+          }
+          const buf = await resp.arrayBuffer();
+          if (buf.byteLength > STL_MAX_BYTES) {
+            throw new Error(`STL too large (${(buf.byteLength / 1e6).toFixed(1)} MB)`);
+          }
+          stlBytesCache.set(url, buf);
+        }
+        return stlBytesCache.get(url);
+      })(),
+    ]);
+    if (dead() || !card.isConnected) return;
+    const parsed = parseBinaryStl(buffer);
+    if (!parsed) throw new Error("unparseable STL (ASCII or truncated)");
+
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute("position", new THREE.BufferAttribute(parsed.positions, 3));
+    geometry.setAttribute("normal", new THREE.BufferAttribute(parsed.normals, 3));
+    geometry.center();
+    geometry.computeBoundingSphere();
+    const r = geometry.boundingSphere.radius || 1;
+    const w = mediaBox.clientWidth || 300;
+    const h = mediaBox.clientHeight || 200;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(45, w / h, r / 100, r * 40);
+    camera.position.set(r * 2.2, r * 1.6, r * 2.2);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setSize(w, h);
+    renderer.domElement.className = "absolute inset-0 w-full h-full stl-canvas";
+    mediaBox.appendChild(renderer.domElement);
+    entry.renderer = renderer;
+    entry.camera = camera;
+    entry.scene = scene;
+    poster && poster.classList.add("opacity-0");
+
+    scene.add(new THREE.HemisphereLight(0xffffff, 0x3a3f4a, 1.1));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.4);
+    dir.position.set(3, 5, 4);
+    scene.add(dir);
+    scene.add(
+      new THREE.Mesh(
+        geometry,
+        new THREE.MeshStandardMaterial({
+          color: 0xb8bdc9,
+          metalness: 0.15,
+          roughness: 0.55,
+          flatShading: true,
+        })
+      )
+    );
+
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.minDistance = r * 0.6;
+    controls.maxDistance = r * 10;
+    controls.autoRotate = true; // slow showcase spin; stops on first grab
+    controls.autoRotateSpeed = 2.2;
+    controls.addEventListener("start", () => { controls.autoRotate = false; });
+    entry.controls = controls;
+    loader && loader.classList.add("hidden");
+
+    const tick = () => {
+      if (dead() || entry.disposed) return;
+      controls.update();
+      renderer.render(scene, camera);
+      requestAnimationFrame(tick);
+    };
+    tick();
+  } catch (e) {
+    deactivateStl(card);
+    if (!(e && e.name === "AbortError")) {
+      console.warn("STL viewer unavailable:", (e && e.message) || e);
+    }
+  }
+}
+
+function disposeStlEntry(entry) {
+  if (entry.disposed) return;
+  entry.disposed = true;
+  try { entry.controls && entry.controls.dispose(); } catch {}
+  try {
+    if (entry.renderer) entry.renderer.dispose();
+  } catch {}
+  // No forceContextLoss(): rapid create/loss cycles trip Chromium's GPU
+  // limiter and wedge later context creation. Detached canvases are reaped
+  // by the browser once GC'd — dispose() + DOM removal is sufficient here.
+}
+
+function deactivateStl(card) {
+  const entry = stlRegistry.get(card);
+  if (entry) {
+    disposeStlEntry(entry);
+    stlRegistry.delete(card);
+  }
+  const canvas = card.querySelector(".stl-canvas");
+  if (canvas) canvas.remove();
+  const loader = card.querySelector(".stl-loading");
+  if (loader) loader.classList.add("hidden");
+  const poster = card.querySelector("[data-stl] img.thumb-img");
+  if (poster) poster.classList.remove("opacity-0");
+}
+
 /* ---------------- tile layout (size setting + reflow) ---------------- */
 
 // Column counts per density setting, indexed by breakpoint tier
@@ -941,6 +1126,7 @@ function buildCard(page) {
     mediatype === "AUDIO" ||
     mime.startsWith("audio/") ||
     /\.(mp3|oga|ogg|wav|flac|opus)$/i.test(fileUrl);
+  const is3D = mediatype === "3D" || mime === "application/sla";
 
   let mediaSrc = fileUrl;
   if ((isVideo || isAudio) && info.derivatives) {
@@ -970,7 +1156,15 @@ function buildCard(page) {
   const description = descrData ? cleanHtml(descrData.value) : cleanTitle;
 
   let mediaHtml;
-  if (isVideo) {
+  if (is3D) {
+    mediaHtml = `
+      <div class="relative w-full overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}" data-stl="${esc(fileUrl)}">
+        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
+        <div class="absolute top-2 left-2 z-10 bg-purple-700 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">3D</div>
+        <div class="absolute bottom-2 right-2 z-10 bg-black/70 text-zinc-200 text-[8px] font-bold px-1.5 py-0.5 rounded transition-opacity duration-200 opacity-0 group-hover:opacity-100 pointer-events-none">drag to spin · wheel to zoom</div>
+        <div class="stl-loading absolute inset-0 z-20 hidden items-center justify-center bg-zinc-900/80"><span class="text-[10px] font-mono text-blue-400 animate-pulse">loading model…</span></div>
+      </div>`;
+  } else if (isVideo) {
     mediaHtml = `
       <div class="relative w-full overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}">
         <div class="absolute inset-0 flex items-center justify-center opacity-20 media-placeholder"><svg class="w-12 h-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg></div>
@@ -1029,6 +1223,54 @@ function buildCard(page) {
     </div>`;
 
   // Hover-to-play video (loads lazily; paused/reset on leave)
+  // 3D STL tiles: hover-to-spin orbit rig. The tile sits inside a Commons
+  // link — disable native link-drag (it hijacks the pointer from the canvas)
+  // and swallow the post-drag click so spinning never navigates away. Tap on
+  // touch keeps the Commons navigation, matching video-tile behavior.
+  const stlBox = card.querySelector("[data-stl]");
+  if (stlBox) {
+    const stlUrl = stlBox.getAttribute("data-stl");
+    const stlLink = card.querySelector("a.media-link");
+    let stlActive = false;
+    let stlHoverTimer = null;
+    if (stlLink) {
+      stlLink.draggable = false;
+      stlLink.addEventListener("dragstart", (e) => e.preventDefault());
+      // While the 3D rig is active, clicks on the canvas never navigate —
+      // spin gestures must not open Commons mid-drag (the tile link stays
+      // live for touch taps before activation, matching video-tile behavior).
+      stlLink.addEventListener("click", (e) => {
+        if (stlActive) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      }, true);
+    }
+    const stlActivate = () => {
+      if (stlActive) return;
+      stlActive = true;
+      activateStl(card, stlBox, stlUrl).catch(() => { stlActive = false; });
+    };
+    const stlDeactivate = () => {
+      stlActive = false;
+      clearTimeout(stlHoverTimer);
+      deactivateStl(card);
+    };
+    // 150ms dwell gate: scrolling with the cursor over the wall fires
+    // pointerenter on every tile that passes underneath — without the gate
+    // each one fetches bytes and spins up a WebGL context (churn → GPU
+    // limiter). A deliberate hover dwells; a scroll fly-over never does.
+    stlBox.addEventListener("pointerenter", (e) => {
+      if (e.pointerType !== "mouse") return;
+      clearTimeout(stlHoverTimer);
+      stlHoverTimer = setTimeout(stlActivate, 150);
+    });
+    stlBox.addEventListener("pointerleave", (e) => {
+      if (e.pointerType !== "mouse") return;
+      stlDeactivate();
+    });
+  }
+
   const mediaEl = card.querySelector(".media-element");
   if (mediaEl) {
     card.addEventListener("mouseenter", () => {
