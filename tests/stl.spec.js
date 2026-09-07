@@ -220,6 +220,28 @@ async page => {
     }
   });
 
+  await step("6b. large model (over the old 40MB cap) renders with progress", async () => {
+    const idx = await page.evaluate(() => {
+      const boxes = [...document.querySelectorAll("[data-stl]")];
+      for (let i = 0; i < boxes.length; i++) {
+        const a = boxes[i].closest(".group")?.querySelector("a.media-link");
+        try {
+          if (a && decodeURIComponent(a.href.split("/wiki/")[1]).includes("A STATUE")) return i;
+        } catch {}
+      }
+      return -1;
+    });
+    t("40.2MB tile found in DOM", idx >= 0, `index ${idx}`);
+    if (idx < 0) return;
+    const loc = page.locator("[data-stl]").nth(idx);
+    const c = await center(loc);
+    await page.mouse.move(c.x, c.y, { steps: 4 });
+    const t0 = Date.now();
+    await loc.locator("canvas").waitFor({ timeout: 90000 });
+    t("40.2MB model renders (streamed + parsed)", true, `${((Date.now() - t0) / 1000).toFixed(1)}s incl. fetch`);
+    await leaveTile(loc);
+  });
+
   page.off("request", onReq);
   const passed = results.filter((r) => r.startsWith("PASS")).length;
   const summary = `STL spec: ${passed} passed, ${failed} failed\n${results.join("\n")}`;

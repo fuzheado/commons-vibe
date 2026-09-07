@@ -308,7 +308,14 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 
 - `activateStl(card, mediaBox, url)` / `deactivateStl` / `disposeStlEntry` / `parseBinaryStl` / `ensureStlLib` — hover-to-spin 3D for `application/sla` (mediatype `3D`) tiles. Server thumbs stay as posters; a **150ms dwell gate** on pointerenter (scroll fly-overs never activate), then lazy `import("three")` + fetch of the raw STL (bytes cached per URL — re-hover instant), binary parse (ASCII/unparseable → poster kept), flat-shaded MeshStandardMaterial + hemisphere/directional lights, OrbitControls with auto-rotate until first grab.
 - **Constraints that shaped it:** upload.wikimedia.org sends `access-control-allow-origin: *` on raw file bytes (verified 2026-09-04 — the skills-table "no CORS" row is outdated for file media), so no proxy is needed; Toolforge CSP blocks CDN scripts → vendor same-origin; `forceContextLoss()` is deliberately NOT used — rapid create/loss cycles wedge later context creation in Chromium.
-- **Cap:** Content-Length pre-check (CORS-exposed) + post-read check at 40MB — megabyte monsters keep their poster (Category:STL files has 40-102MB entries).
+- **Size tiers (2026-09-07):** streamed downloads with live progress in the
+  loading overlay ("loading… 43% (17.1/40.2 MB)", "large model — " prefix over
+  50MB); 150MB hard ceiling (memory safety), 30s no-byte stall detector
+  (fixed 20s timeouts cannot fetch 104MB); buffers >25MB skip the bytes cache
+  (HTTP cache re-serves on re-hover). Category:STL files has 40-104MB entries
+  — they all render now. Parser accepts trailing exporter padding (facets must
+  FIT, not byte-exact). Failures show "3D unavailable — <reason>" for 2.6s,
+  never a silent revert-to-poster.
 - **Link interplay:** the tile sits inside the Commons `a.media-link` — `draggable=false` + dragstart preventDefault (native link-drag hijacks the pointer), and clicks are swallowed while the rig is active (spin gestures must not navigate). Touch taps before activation keep the Commons navigation, matching video tiles.
 - **Test hook:** `window.__cvStl = { registry, bytesCache }` — spec-only; the app never reads it.
 - **Open:** mobile touch orbit (tap = Commons nav for now), ASCII STL parsing, canvas size stale after window resize between hover cycles, `pageKind()` returns null for mediatype 3D so STL shows only under All Media.

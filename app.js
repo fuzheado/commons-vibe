@@ -832,8 +832,10 @@ function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
 // verified 2026-09-04, unlike the no-CORS row in the skills table), parses
 // binary STL, and spins an OrbitControls rig with auto-rotate until the user
 // grabs it. Dispose on leave. Bytes are cached per URL — re-hover is instant.
-const STL_MAX_BYTES = 40e6; // megabyte monsters keep the poster
-const STL_FETCH_TIMEOUT = 20000; // congested upload servers must fail fast
+const STL_MAX_BYTES = 150e6;      // hard ceiling — memory safety above this
+const STL_WARN_BYTES = 50e6;      // "large model" tier — progress UI flags it
+const STL_CACHE_MAX_BYTES = 25e6; // don't hoard giant buffers; HTTP cache re-serves
+const STL_STALL_MS = 30000;       // no bytes for 30s = stalled connection
 const stlRegistry = new Map();   // card el → {controls, renderer, camera, ...}
 const stlBytesCache = new Map(); // cleanUrl → ArrayBuffer
 
@@ -861,7 +863,9 @@ function parseBinaryStl(buffer) {
   if (buffer.byteLength < 84) return null;
   const view = new DataView(buffer);
   const count = view.getUint32(80, true);
-  if (count === 0 || 84 + count * 50 !== buffer.byteLength) return null;
+  // Trailing bytes are legal (some exporters pad) — require the facets to
+  // FIT, not the file to be byte-exact.
+  if (count === 0 || 84 + count * 50 > buffer.byteLength) return null;
   const positions = new Float32Array(count * 9);
   const normals = new Float32Array(count * 9);
   for (let i = 0; i < count; i++) {
@@ -883,6 +887,63 @@ function parseBinaryStl(buffer) {
   return { positions, normals };
 }
 
+// Stream the STL with live progress (a 104MB file must not look hung) and a
+// stall detector (30s without bytes = dead connection). Buffers >25MB skip
+// the bytes cache — the browser HTTP cache re-serves them on re-hover.
+async function fetchStlBuffer(mediaBox, url) {
+  if (stlBytesCache.has(url)) return stlBytesCache.get(url);
+  const resp = await fetch(url, { signal: state.abort.signal });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const total = parseInt(resp.headers.get("content-length") || "0", 10);
+  if (total > STL_MAX_BYTES) throw new Error(`STL too large (${(total / 1e6).toFixed(0)} MB)`);
+  const loaderText = mediaBox.querySelector(".stl-loading span");
+  const progress = (got, tot) => {
+    if (!loaderText) return;
+    const mb = (n) => (n / 1e6).toFixed(1);
+    loaderText.textContent = tot
+      ? `${tot > STL_WARN_BYTES ? "large model — " : ""}loading… ${Math.round((got / tot) * 100)}% (${mb(got)}/${mb(tot)} MB)`
+      : `loading… ${mb(got)} MB`;
+  };
+  let buffer;
+  if (!resp.body) {
+    buffer = await resp.arrayBuffer();
+  } else {
+    const reader = resp.body.getReader();
+    const chunks = [];
+    let got = 0;
+    let stallTimer = 0;
+    const resetStall = () => {
+      clearTimeout(stallTimer);
+      stallTimer = setTimeout(() => reader.cancel("stalled"), STL_STALL_MS);
+    };
+    resetStall();
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        resetStall();
+        chunks.push(value);
+        got += value.length;
+        if (got > STL_MAX_BYTES) throw new Error("STL too large (>150 MB)");
+        progress(got, total);
+      }
+    } finally {
+      clearTimeout(stallTimer);
+    }
+    buffer = new Uint8Array(got).buffer;
+    let off = 0;
+    for (const c of chunks) {
+      new Uint8Array(buffer, off, c.length).set(c);
+      off += c.length;
+    }
+  }
+  if (buffer.byteLength > STL_MAX_BYTES) {
+    throw new Error(`STL too large (${(buffer.byteLength / 1e6).toFixed(0)} MB)`);
+  }
+  if (buffer.byteLength <= STL_CACHE_MAX_BYTES) stlBytesCache.set(url, buffer);
+  return buffer;
+}
+
 async function activateStl(card, mediaBox, url) {
   const entry = { controls: null, renderer: null, camera: null, disposed: false };
   stlRegistry.set(card, entry);
@@ -890,29 +951,10 @@ async function activateStl(card, mediaBox, url) {
   const loader = mediaBox.querySelector(".stl-loading");
   const poster = mediaBox.querySelector("img.thumb-img");
   try {
-    loader && loader.classList.remove("hidden");
+    loader && loader.classList.add("show");
     const [{ THREE, OrbitControls }, buffer] = await Promise.all([
       ensureStlLib(),
-      (async () => {
-        if (!stlBytesCache.has(url)) {
-          const resp = await fetch(url, {
-            signal: AbortSignal.any([state.abort.signal, AbortSignal.timeout(STL_FETCH_TIMEOUT)]),
-          });
-          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-          // Pre-read cap via Content-Length (CORS-exposed) — don't download
-          // 100MB just to throw. Post-read check covers chunked responses.
-          const len = parseInt(resp.headers.get("content-length") || "0", 10);
-          if (len > STL_MAX_BYTES) {
-            throw new Error(`STL too large (${(len / 1e6).toFixed(1)} MB)`);
-          }
-          const buf = await resp.arrayBuffer();
-          if (buf.byteLength > STL_MAX_BYTES) {
-            throw new Error(`STL too large (${(buf.byteLength / 1e6).toFixed(1)} MB)`);
-          }
-          stlBytesCache.set(url, buf);
-        }
-        return stlBytesCache.get(url);
-      })(),
+      fetchStlBuffer(mediaBox, url),
     ]);
     if (dead() || !card.isConnected) return;
     const parsed = parseBinaryStl(buffer);
@@ -965,7 +1007,7 @@ async function activateStl(card, mediaBox, url) {
     controls.autoRotateSpeed = 2.2;
     controls.addEventListener("start", () => { controls.autoRotate = false; });
     entry.controls = controls;
-    loader && loader.classList.add("hidden");
+    loader && loader.classList.remove("show"); // success — reveal the canvas
 
     const tick = () => {
       if (dead() || entry.disposed) return;
@@ -976,8 +1018,15 @@ async function activateStl(card, mediaBox, url) {
     tick();
   } catch (e) {
     deactivateStl(card);
-    if (!(e && e.name === "AbortError")) {
-      console.warn("STL viewer unavailable:", (e && e.message) || e);
+    if (e && e.name === "AbortError") return;
+    console.warn("STL viewer unavailable:", (e && e.message) || e);
+    // Explicit feedback — a silent revert-to-poster reads as "broken tile".
+    const loader = mediaBox.querySelector(".stl-loading");
+    const msg = loader && loader.querySelector("span");
+    if (loader && msg) {
+      msg.textContent = `3D unavailable — ${(e && e.message) || "error"}`;
+      loader.classList.add("show");
+      setTimeout(() => loader.classList.remove("show"), 2600);
     }
   }
 }
@@ -1003,7 +1052,7 @@ function deactivateStl(card) {
   const canvas = card.querySelector(".stl-canvas");
   if (canvas) canvas.remove();
   const loader = card.querySelector(".stl-loading");
-  if (loader) loader.classList.add("hidden");
+  if (loader) loader.classList.remove("show");
   const poster = card.querySelector("[data-stl] img.thumb-img");
   if (poster) poster.classList.remove("opacity-0");
 }
@@ -1162,7 +1211,7 @@ function buildCard(page) {
         <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
         <div class="absolute top-2 left-2 z-10 bg-purple-700 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">3D</div>
         <div class="absolute bottom-2 right-2 z-10 bg-black/70 text-zinc-200 text-[8px] font-bold px-1.5 py-0.5 rounded transition-opacity duration-200 opacity-0 group-hover:opacity-100 pointer-events-none">drag to spin · wheel to zoom</div>
-        <div class="stl-loading absolute inset-0 z-20 hidden items-center justify-center bg-zinc-900/80"><span class="text-[10px] font-mono text-blue-400 animate-pulse">loading model…</span></div>
+        <div class="stl-loading absolute inset-0 z-20 items-center justify-center bg-zinc-900/80"><span class="text-[10px] font-mono text-blue-400 animate-pulse">loading model…</span></div>
       </div>`;
   } else if (isVideo) {
     mediaHtml = `

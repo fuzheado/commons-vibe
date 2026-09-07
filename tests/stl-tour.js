@@ -104,6 +104,32 @@ async page => {
     await page.mouse.move(c.x, c.y - 350, { steps: 4 });
     await pause(500);
   }
+  // ── Scene 6b: a big model (40MB+) — progress overlay, then spin ──
+  const bigIdx = await page.evaluate(() => {
+    const boxes = [...document.querySelectorAll("[data-stl]")];
+    for (let i = 0; i < boxes.length; i++) {
+      const a = boxes[i].closest(".group")?.querySelector("a.media-link");
+      try { if (a && decodeURIComponent(a.href.split("/wiki/")[1]).includes("A STATUE")) return i; } catch { return -1; }
+    }
+    return -1;
+  });
+  if (bigIdx >= 0) {
+    const loc = page.locator("[data-stl]").nth(bigIdx);
+    c = await center(loc);
+    await page.mouse.move(c.x, c.y, { steps: 6 });
+    await pause(1200);
+    await shot("tour-6b-large-progress");
+    await loc.locator("canvas").waitFor({ timeout: 90000 });
+    await pause(1500);
+    await page.mouse.down();
+    await page.mouse.move(c.x + 140, c.y + 40, { steps: 20 });
+    await page.mouse.up();
+    await pause(800);
+    await shot("tour-6c-large-orbited");
+    await page.mouse.move(c.x, c.y - 350, { steps: 4 });
+    await pause(500);
+  }
+
   await shot("tour-7-done");
   return "tour complete";
 }
