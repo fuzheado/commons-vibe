@@ -1,0 +1,7 @@
+# Issue template configuration
+# Docs: https://docs.github.com/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository
+#
+# blank_issues_enabled keeps the "Open a blank issue" option in the template
+# chooser, so anything that isn't a bug report or feature request still has a
+# clean path (questions, data/API quirks, seed-category suggestions, …).
+blank_issues_enabled: true
