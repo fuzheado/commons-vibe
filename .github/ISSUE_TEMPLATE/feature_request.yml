@@ -1,0 +1,37 @@
+name: ✨ Feature request
+description: Suggest a new capability, browsing mode, or improvement for CommonsVibe
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the idea! Before filing, please:
+        * search existing issues to see if it's already been suggested
+        * check the roadmap in the [README](https://github.com/fuzheado/commons-vibe/blob/main/README.md)
+          — some planned items (collections, accounts, natural-language search) are already scoped
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do that you can't today?
+      description: Describe the gap or frustration — context beats a bare feature name.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: What should the feature look like?
+      description: How would you expect it to work? Where in the UI (header, grid, tile menu, tree…)? Feel free to sketch.
+    validations:
+      required: true
+  - type: input
+    id: example
+    attributes:
+      label: Example category or URL
+      description: A concrete Commons category or link where this feature would shine (optional but very helpful).
+      placeholder: "https://commons-vibe.toolforge.org/?cat=Category%3A…"
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you've tried
+      description: Any workarounds or similar tools that almost do the job?
