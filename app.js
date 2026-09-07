@@ -27,7 +27,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.12 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.13 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -42,7 +42,7 @@ const state = {
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
-  type: "all",                   // media filter all|image|video|audio (URL param type=)
+  type: "all",                   // media filter all|image|video|audio|3d (URL param type=)
   lastDeepPicks: new Set(),      // categories used by the previous deep batch
   lastRoulettePicks: [],         // recent roulette landings (anti-repeat; NOT reset per category)
   list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
@@ -391,6 +391,7 @@ const TYPE_TERM = {
   image: 'filetype:"bitmap|drawing"',
   video: "filetype:video",
   audio: "filetype:audio",
+  "3d": "filetype:3d", // validated live 2026-09-07 (STL / application/sla)
 };
 
 function typeSearchTerm() {
@@ -406,6 +407,7 @@ function pageKind(page) {
   const mime = (info.mime || "").toLowerCase();
   if (mt === "VIDEO" || mime.startsWith("video/")) return "video";
   if (mt === "AUDIO" || mime.startsWith("audio/")) return "audio";
+  if (mt === "3D" || mime === "application/sla") return "3d"; // STL — mirrors buildCard's is3D
   if (mt === "BITMAP" || mt === "DRAWING" || mime.startsWith("image/")) return "image";
   return null; // office docs, unknown — only shown with the All filter
 }

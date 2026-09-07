@@ -12,6 +12,13 @@ Live at **https://commons-vibe.toolforge.org/**.
 ## Current state (updated 2026-09-04, v1.11 deployed)
 
 - **Deployed:** live site matches `main` (verified via SHA256).
+- **2026-09-07 — 3D media filter (v1.13):** the type filter gains 3D (STL).
+  `pageKind()` now returns `3d` for mediatype `3D` / mime `application/sla`
+  (mirrors `buildCard`'s `is3D`, closing the old gap where STL only showed
+  under All Media); `TYPE_TERM["3d"] = "filetype:3d"` (validated live — 248
+  hits inside Category:STL files; combos like `filetype:"video|3d"` also
+  work, banked for a future multi-select). URL param `type=3d` round-trips.
+  Issue #14.
 - **2026-09-04 — payload optimization:** all three fetch paths (alpha, shuffle,
   list) now send `iiextmetadatafilter=ImageDescription|ObjectName` — the only
   extmetadata fields the app reads — cutting each 12-tile batch ~3×
@@ -47,7 +54,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio&path=<trail>[&deep=1][&tree=1&depth=N][&pile=|&psid=|&pet=&petdepth=]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&pile=|&psid=|&pet=&petdepth=]`.
   `type=` filters the feed client-side (alpha/list) and server-side (shuffle/deep
   append CirrusSearch `filetype:` terms). `pile=`/`psid=`/`pet=` activate **list
   mode**: the feed renders an external file list instead of a category
@@ -118,9 +125,12 @@ python3 -m http.server 8123        # any static server works; no build step
     subcategory that has files; trail + Back/Forward integrate. The dice is
     hidden entirely below 4 subcats (e.g. Featured pictures on Wikimedia
     Commons — its single "vector" subcat shows as a chip, no dice).
-17. Type filter: header select — Images/Video/Audio filter the feed (shuffle
-    filters server-side; alpha client-side); `type=` round-trips; "All Media"
-    restores.
+17. Type filter: header select — Images/Video/Audio/**3D** filter the feed
+    (3D = mediatype `3D`/mime `application/sla` client-side, `filetype:3d`
+    server-side in shuffle; shuffle filters server-side; alpha client-side);
+    `type=` round-trips; "All Media" restores. Quick check: `?type=3d` on
+    Category:STL files renders only STL tiles; `?type=image` there renders
+    nothing (End of Collection after the fill-up loop exhausts the category).
 18. List mode: `?pet=<Cat>&petdepth=N` (or `?pile=`/`?psid=`) renders the list
     as a feed — dropdown shows the list label, sort pill hidden, size/view/type
     still work; clicking a tile's category pill exits list mode into that
@@ -287,12 +297,13 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   engage, so the dice would just replay the same few landings. The pool
   helper is shared with `categoryRoulette`, so the gate and the spin always
   agree on what a spin would pick from.
-- **Type filter:** header `type-select` (All/Images/Video/Audio). `pageKind()`
-  classifies from `mediatype`/`mime` (now requested explicitly —
+- **Type filter:** header `type-select` (All/Images/Video/Audio/**3D** — 3D
+  added 2026-09-07, v1.13). `pageKind()` classifies from `mediatype`/`mime`
+  (now requested explicitly —
   `iiprop=url|extmetadata|derivatives` OVERRIDES API defaults and omits them;
   classic gotcha). Client-side in renderPages (alpha/list) + server-side
   `filetype:` terms in shuffle/deep searches (`TYPE_TERM`; multi-value
-  `filetype:"bitmap|drawing"` needs quotes).
+  `filetype:"bitmap|drawing"` needs quotes; `3d` is a plain single value).
 - **List mode:** `state.list = {source:'pile'|'psid'|'pet', id, depth?, titles,
   cursor}`. `loadList()` fetches (CORS is open on both services — verified):
   PagePile `pagepile.toolforge.org/api.php?id=N&action=get_data` (note: host
@@ -318,7 +329,7 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   never a silent revert-to-poster.
 - **Link interplay:** the tile sits inside the Commons `a.media-link` — `draggable=false` + dragstart preventDefault (native link-drag hijacks the pointer), and clicks are swallowed while the rig is active (spin gestures must not navigate). Touch taps before activation keep the Commons navigation, matching video tiles.
 - **Test hook:** `window.__cvStl = { registry, bytesCache }` — spec-only; the app never reads it.
-- **Open:** mobile touch orbit (tap = Commons nav for now), ASCII STL parsing, canvas size stale after window resize between hover cycles, `pageKind()` returns null for mediatype 3D so STL shows only under All Media.
+- **Open:** mobile touch orbit (tap = Commons nav for now), ASCII STL parsing, canvas size stale after window resize between hover cycles. ~~`pageKind()` returns null for mediatype 3D so STL shows only under All Media~~ — fixed v1.13: type filter now has a 3D option (`type=3d`).
 
 ### Tile layout (v1.8)
 
