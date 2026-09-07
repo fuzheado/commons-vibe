@@ -50,7 +50,7 @@ The entire state of your browser is captured in the URL.
 
 CommonsVibe supports distinct ways to interact with media:
 
-1.  **Alphabetical Mode:** The classic organized approach. Browse through a category's contents in order, with 12 tiles loaded at a time as you scroll.
+1.  **Alphabetical Mode:** The classic organized approach. Browse through a category's contents in order, with 12 tiles loaded at a time as you scroll. (When a media-type filter is active in this mode and the type is sparse — e.g. 3D files — matches are drawn directly so tiles appear immediately rather than after a long alphabetical crawl.)
 2.  **Shuffle Mode:** For true serendipity. Using Wikimedia's *CirrusSearch*, this mode pulls 12 random tiles at a time from never-repeating draws, creating a unique, never-ending discovery session. **Deep mode** extends this across a whole subtree: each batch draws from several distinct subcategories (weighted by size), so no single subject floods the screen. The media-type filter applies server-side here.
 
 Both modes work in **Detailed** (filename + 3-line description) and **Minimal** (edge-to-edge images, metadata on hover) views.

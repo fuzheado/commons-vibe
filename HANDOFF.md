@@ -19,6 +19,21 @@ Live at **https://commons-vibe.toolforge.org/**.
   hits inside Category:STL files; combos like `filetype:"video|3d"` also
   work, banked for a future multi-select). URL param `type=3d` round-trips.
   Issue #14.
+- **2026-09-07 — 3D filter zero-match / sparse-type fix (v1.13.1):** alpha
+  + media-type filter: `filteredMatchCount()` preflights the category before
+  the crawl (CirrusSearch totalhits, 10-min cache); zero matches → instant
+  "End of Collection" (was: a full-category crawl of empty batches). If the
+  ordered crawl then renders nothing two batches in a row (`starvedBatches`),
+  `filteredDrawBatch()` takes over — type-matched random draws via the
+  shuffle sampler (deduped by `seenTitles`) — so a rare type paints in
+  seconds (3D: 1 file among 22,321 on the default landing ≈ 1,860 blank
+  batches before). Draws end on an empty batch → End of Collection. Common
+  types (image on photo categories) never starve → alpha order preserved;
+  shuffle/deep/list unaffected (empty draws already ended there). New module
+  vars reset in `resetAndFetch`. Reported live: "selecting 3D doesn't
+  refresh" — actually the crawl marathon / no-op wall on all-STL categories.
+  Caveat: incategory: is CirrusSearch — an intermittent server-side zero
+  (T246568) can false-positive the preflight; All Media always recovers.
 - **2026-09-04 — payload optimization:** all three fetch paths (alpha, shuffle,
   list) now send `iiextmetadatafilter=ImageDescription|ObjectName` — the only
   extmetadata fields the app reads — cutting each 12-tile batch ~3×
@@ -149,6 +164,12 @@ python3 -m http.server 8123        # any static server works; no build step
     canvas and restores the poster; re-hover is instant (bytes cached);
     files over 40MB keep their poster (graceful fallback). Regression: run
     `tests/run.sh` — 22 assertions, then records the video artifact.
+21. Sparse-type filter (v1.13.1): alpha + `type=3d` on a category with very
+    few matches (e.g. Category:Featured pictures on Wikimedia Commons — 1 STL
+    in 22,321 files) paints the match within a few seconds (preflight →
+    starved-crawl fallback draws) then End of Collection; on a category with
+    none (e.g. Category:Videos of animals + `type=3d`) End of Collection
+    appears immediately (no crawl marathon).
 
 ## Deploy to Toolforge
 
@@ -301,7 +322,9 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   added 2026-09-07, v1.13). `pageKind()` classifies from `mediatype`/`mime`
   (now requested explicitly —
   `iiprop=url|extmetadata|derivatives` OVERRIDES API defaults and omits them;
-  classic gotcha). Client-side in renderPages (alpha/list) + server-side
+  classic gotcha). Client-side in renderPages (alpha/list; v1.13.1: alpha
+  preflights the match count and falls back to type draws when the crawl
+  starves — see the v1.13.1 bullet) + server-side
   `filetype:` terms in shuffle/deep searches (`TYPE_TERM`; multi-value
   `filetype:"bitmap|drawing"` needs quotes; `3d` is a plain single value).
 - **List mode:** `state.list = {source:'pile'|'psid'|'pet', id, depth?, titles,

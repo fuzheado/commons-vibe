@@ -27,7 +27,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.13 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.13.1 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -726,6 +726,10 @@ async function fetchBatch() {
     }
     return { pages, hasEnded: pages.length === 0 };
   }
+
+  // Alpha + type filter with a starved crawl: draw matches instead of
+  // crawling the whole category (see filteredDrawBatch / fetchImages).
+  if (state.type !== "all" && typeDrawFallback) return filteredDrawBatch();
 
   // Alpha: categorymembers generator, cacheable per (category, continue token).
   const params = {
@@ -1762,6 +1766,57 @@ function handleDeepOff() {
 // viewport + rootMargin (short pages, minimal view, tall windows), keep loading
 // until the page actually overflows — otherwise infinite scroll stalls forever.
 let lastBatchOk = false;
+// Alpha + type-filter machinery (issue #14, v1.13.1): client-side filtering
+// renders nothing until the ordered crawl reaches a match, so a RARE type
+// (3D/STL — one file among 22,321 in the default landing category) meant
+// ~1,860 blank batches. typePreflighted = match count already asked;
+// starvedBatches/typeDrawFallback = crawl starved twice → draw matches
+// directly (filteredDrawBatch). All three reset per resetAndFetch.
+let typePreflighted = false;
+let starvedBatches = 0;
+let typeDrawFallback = false;
+
+// Zero-match fast-fail: count the active type's files inside the current
+// category BEFORE the alpha crawl (10-min cache). Zero hits ends the feed
+// immediately instead of crawling a category that holds none of that type.
+// Note: incategory: is CirrusSearch — an intermittent server-side zero
+// (T246568) could false-positive here; All Media always recovers.
+async function filteredMatchCount() {
+  const catName = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
+  const res = await api({
+    action: "query",
+    list: "search",
+    srsearch: `incategory:"${catName}"${typeSearchTerm()}`,
+    srnamespace: "6",
+    srlimit: "1",
+  }, { ttl: 10 * 60e3 });
+  return (res.query && res.query.searchinfo && res.query.searchinfo.totalhits) || 0;
+}
+
+// Starved-crawl fallback batch: draw type-matched tiles directly via the
+// shuffle sampler (the type term is server-side there — one query per batch
+// instead of crawling the whole category). Deduped through seenTitles; an
+// empty draw ends the feed once every match has been shown.
+async function filteredDrawBatch() {
+  const titles = await flatSampleTitles();
+  let pages = [];
+  if (titles.length) {
+    const info = await api({
+      action: "query",
+      titles: titles.join("|"),
+      prop: "imageinfo|videoinfo|categories",
+      clprop: "hidden",
+      cllimit: "max",
+      iiprop: "url|extmetadata|derivatives|mediatype|mime",
+      iiextmetadatafilter: "ImageDescription|ObjectName",
+      viprop: "url|derivatives",
+      iiurlwidth: "480",
+    });
+    pages = (info.query && info.query.pages) || [];
+    shuffle(pages);
+  }
+  return { pages, hasEnded: pages.length === 0 };
+}
 
 async function fetchImages() {
   // List mode has no current category; everything else requires one.
@@ -1770,9 +1825,23 @@ async function fetchImages() {
   state.isLoading = true;
   const reqId = state.requestId;
   try {
+    // Type-filter preflight (alpha only; shuffle/deep already end on empty
+    // draws): zero matches in the category → End of Collection immediately.
+    if (state.type !== "all" && !state.sortShuffle && !state.list && state.currentCategory && !typePreflighted) {
+      const hits = await filteredMatchCount();
+      if (reqId !== state.requestId) return; // stale — a newer request owns the grid
+      typePreflighted = true;
+      if (hits === 0) {
+        state.hasReachedEnd = true;
+        $("loading-spinner").classList.add("hidden");
+        $("end-message").classList.remove("hidden");
+        return;
+      }
+    }
     const batch = await getBatch();
     if (reqId !== state.requestId) return; // stale — a newer request owns the grid
     lastBatchOk = true;
+    const cardsBefore = state.items.length;
     if (batch.pages.length) {
       renderPages(batch.pages);
       if (!batch.hasEnded) prefetchNext();
@@ -1781,6 +1850,19 @@ async function fetchImages() {
       state.hasReachedEnd = true;
       $("loading-spinner").classList.add("hidden");
       $("end-message").classList.remove("hidden");
+    }
+    // Starvation tracking (alpha + filter only): consecutive crawl batches
+    // that render nothing mean the matches sit deep in the category — flip
+    // to direct type draws after two misses so tiles paint immediately.
+    if (state.type !== "all" && !state.sortShuffle && !state.list && !typeDrawFallback) {
+      if (state.items.length === cardsBefore) {
+        if (++starvedBatches >= 2) {
+          typeDrawFallback = true;
+          state.continueToken = null; // abandon the ordered crawl for this session
+        }
+      } else {
+        starvedBatches = 0;
+      }
     }
   } catch (e) {
     console.error("fetchImages error:", e);
@@ -1804,6 +1886,9 @@ function resetAndFetch() {
   state.abort = new AbortController();
   prefetchPromise = null; // drop any in-flight prefetch for the old category
   lastBatchOk = false;
+  typePreflighted = false; // fresh category/filter: redo the zero-match preflight
+  starvedBatches = 0;
+  typeDrawFallback = false;
   state.isLoading = false;
   state.hasReachedEnd = false;
   state.continueToken = null;
