@@ -42,6 +42,8 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
+| `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
+| `tests/` | TDD suite: `stl.spec.js` (22 behavioral assertions, run via `playwright-cli run-code`), `stl-tour.js` (showcase tour), `run.sh` (spec → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. |
 
 ## URL contract & persistence (do not break)
 
@@ -129,6 +131,14 @@ python3 -m http.server 8123        # any static server works; no build step
     shows "N matches · of M loaded"; Escape clears; clicking a filtered row
     navigates and closes the modal; reopening starts unfiltered; depth change
     and "Load 500 more" preserve the filter (re-applied after rebuild).
+20. STL 3D viewer: an STL category (e.g. Category:STL files, All Media filter)
+    shows posters + "3D" badges; zero .stl bytes fetched until a tile is
+    hovered ≥150ms; hovering swaps the poster for a WebGL canvas with slow
+    auto-rotate; horizontal drag = yaw, vertical drag = pitch, wheel = zoom;
+    spin-drag never opens the Commons link; leaving the tile disposes the
+    canvas and restores the poster; re-hover is instant (bytes cached);
+    files over 40MB keep their poster (graceful fallback). Regression: run
+    `tests/run.sh` — 22 assertions, then records the video artifact.
 
 ## Deploy to Toolforge
 
@@ -210,6 +220,15 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **CORS-friendly helpers:** PagePile (`pagepile.toolforge.org` — host moved off
   wikimedia.cloud) and PetScan (`petscan.wmcloud.org`) both send
   `access-control-allow-origin: *`; the browser fetches them directly.
+- **Browser fetches stay header-free (do not "fix" this):** `api()` sends NO
+  custom headers — a header-free GET is a CORS *simple request* (no preflight,
+  works in every engine). Browsers cannot set `User-Agent`; `Api-User-Agent`
+  would force an OPTIONS preflight before every api.php call (double requests,
+  extra latency under congestion). Per the wikimedia-api-access skill's
+  preflight-trap guidance (verified 2026-09-03), that is the correct trade for
+  browser apps. Only `loadList()` sets `Api-User-Agent` — PetScan/PagePile are
+  preflight-verified to allow it. If traffic identification at WMF ever
+  becomes a requirement, the answer is a server-side proxy, not fetch headers.
 
 ## Code map (`app.js`)
 
@@ -284,6 +303,22 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   skipped). `fetchImages` guard relaxed: list mode has no current category.
   Exiting: click any category pill (navigateTo clears state.list), or navigate
   via search/dropdown.
+
+### 3D STL viewer (feature branch)
+
+- `activateStl(card, mediaBox, url)` / `deactivateStl` / `disposeStlEntry` / `parseBinaryStl` / `ensureStlLib` — hover-to-spin 3D for `application/sla` (mediatype `3D`) tiles. Server thumbs stay as posters; a **150ms dwell gate** on pointerenter (scroll fly-overs never activate), then lazy `import("three")` + fetch of the raw STL (bytes cached per URL — re-hover instant), binary parse (ASCII/unparseable → poster kept), flat-shaded MeshStandardMaterial + hemisphere/directional lights, OrbitControls with auto-rotate until first grab.
+- **Constraints that shaped it:** upload.wikimedia.org sends `access-control-allow-origin: *` on raw file bytes (verified 2026-09-04 — the skills-table "no CORS" row is outdated for file media), so no proxy is needed; Toolforge CSP blocks CDN scripts → vendor same-origin; `forceContextLoss()` is deliberately NOT used — rapid create/loss cycles wedge later context creation in Chromium.
+- **Size tiers (2026-09-07):** streamed downloads with live progress in the
+  loading overlay ("loading… 43% (17.1/40.2 MB)", "large model — " prefix over
+  50MB); 150MB hard ceiling (memory safety), 30s no-byte stall detector
+  (fixed 20s timeouts cannot fetch 104MB); buffers >25MB skip the bytes cache
+  (HTTP cache re-serves on re-hover). Category:STL files has 40-104MB entries
+  — they all render now. Parser accepts trailing exporter padding (facets must
+  FIT, not byte-exact). Failures show "3D unavailable — <reason>" for 2.6s,
+  never a silent revert-to-poster.
+- **Link interplay:** the tile sits inside the Commons `a.media-link` — `draggable=false` + dragstart preventDefault (native link-drag hijacks the pointer), and clicks are swallowed while the rig is active (spin gestures must not navigate). Touch taps before activation keep the Commons navigation, matching video tiles.
+- **Test hook:** `window.__cvStl = { registry, bytesCache }` — spec-only; the app never reads it.
+- **Open:** mobile touch orbit (tap = Commons nav for now), ASCII STL parsing, canvas size stale after window resize between hover cycles, `pageKind()` returns null for mediatype 3D so STL shows only under All Media.
 
 ### Tile layout (v1.8)
 

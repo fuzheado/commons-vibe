@@ -127,3 +127,7 @@
 .video-container video, .audio-container {
     pointer-events: none;
 }
+
+/* STL loading overlay — toggled via .show (avoids Tailwind hidden/flex order) */
+.stl-loading { display: none; }
+.stl-loading.show { display: flex; }

@@ -8,6 +8,11 @@
     <link rel="preconnect" href="https://upload.wikimedia.org">
     <link rel="dns-prefetch" href="https://commons.wikimedia.org">
     <link rel="stylesheet" href="style.css">
+    <!-- Resolves the vendored OrbitControls' bare "three" specifier (vendor/ is
+         same-origin — Toolforge CSP blocks CDN imports). Loaded lazily on STL hover. -->
+    <script type="importmap">
+    {"imports": {"three": "./vendor/three.module.min.js"}}
+    </script>
     <script type="module" src="app.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
