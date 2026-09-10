@@ -12,6 +12,38 @@ Live at **https://commons-vibe.toolforge.org/**.
 ## Current state (updated 2026-09-04, v1.11 deployed)
 
 - **Deployed:** live site matches `main` (verified via SHA256).
+- **2026-09-09 — scroll-aware collapsing header (v1.14, issue #17):** on
+  touch-primary devices (`(pointer: coarse)` — phones/tablets) the sticky
+  header hides after ~100px of downward scroll and returns on upward scroll
+  or a tap in the top 48px of the viewport. Implemented transform-only
+  (`translateY(-100%)` on the pinned sticky band) — zero reflow, the masonry
+  never moves; rAF-throttled passive scroll sampling with an 8px direction
+  dead-zone (no jitter/bounce-back flicker); a capture-phase tap-zone swallow
+  prevents the tile under the expanding band from opening; collapse never
+  fires behind an open modal. **Touch-only by design:** desktop keeps the
+  always-visible band (the STL suite parks its mouse in the header zone).
+  Coarse-pointer CSS bumps header controls toward 40px+ tap targets.
+  Regression: `tests/header-collapse.spec.js` (25 assertions, runs in its own
+  touch-emulated context). Both specs now pin their own viewport (stl.spec
+  needs 1280×720 desktop layout — the shared playwright session may carry any
+  size from another spec).
+- **2026-09-10 — case-exact category guard (v1.14.1, live report):** shuffle
+  and deep feeds for `Category:Chop Suey` (a Hopper painting) were also
+  showing food photos from the case-doppelgänger `Category:Chop suey` (the
+  dish). Root cause: CirrusSearch `incategory:`/`deepcategory:` match
+  category titles CASE-INSENSITIVELY, while Commons treats the two as
+  distinct categories (case-sensitive beyond the first char). Fix: every
+  drawn page's own `categories` (already fetched on the same info call) is
+  verified against the target's exact title (`exactCatTitle`/`inCategory`/
+  `filterShufflePages`); shuffle filters to the current category, deep filters
+  to the walked subtree (`state.deepPool`, seeded when the walk resolves).
+  A bounded redraw (≤2 extra draws) lets a whole wrong-case batch be replaced
+  and then the feed ends once the real members are exhausted (Chop Suey has 2
+  painting files vs the twin's 16). `filteredDrawBatch` (alpha+type starve
+  fallback) gets the same guard. Residual: the pre-walk `deepcategory:`
+  fallback passes unfiltered until the walk lands (cold-start window only).
+  Alpha/list modes were never affected (exact generators). Regression:
+  `tests/wrongcase-cat.spec.js` (8 assertions, hits live Commons).
 - **2026-09-07 — 3D media filter (v1.13):** the type filter gains 3D (STL).
   `pageKind()` now returns `3d` for mediatype `3D` / mime `application/sla`
   (mirrors `buildCard`'s `is3D`, closing the old gap where STL only showed
@@ -65,7 +97,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `stl.spec.js` (22 behavioral assertions, run via `playwright-cli run-code`), `stl-tour.js` (showcase tour), `run.sh` (spec → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. |
+| `tests/` | TDD suite: `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (both specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
 
 ## URL contract & persistence (do not break)
 
@@ -170,6 +202,21 @@ python3 -m http.server 8123        # any static server works; no build step
     starved-crawl fallback draws) then End of Collection; on a category with
     none (e.g. Category:Videos of animals + `type=3d`) End of Collection
     appears immediately (no crawl marathon).
+22. Scroll-aware collapsing header (v1.14, issue #17): on a touch device the
+    header is visible at the top; scrolling <100px keeps it; scrolling past
+    ~100px slides it fully out (transform-only — grid/URL/history unchanged);
+    scrolling up restores it; tapping the top ~48px while collapsed restores
+    it without activating the tile underneath (no Commons page opens); a tap
+    outside that zone does nothing; opening the tree modal and scrolling
+    behind it never collapses the header; after closing, collapse resumes.
+    Desktop (mouse) is unchanged — the band never hides. Automated:
+    `tests/header-collapse.spec.js` (25 assertions).
+23. Case-exact category guard (v1.14.1): a shuffle or deep feed for a category
+    that has a different-cased doppelgänger (e.g. `Category:Chop Suey` the
+    Hopper painting vs `Category:Chop suey` the food) shows ONLY files really
+    in the selected category — no wrong-case twin members — and reaches End of
+    Collection instead of looping the twin's files. Automated:
+    `tests/wrongcase-cat.spec.js` (8 assertions).
 
 ## Deploy to Toolforge
 
@@ -487,6 +534,11 @@ fine for a snapshot feature, wrong for a live shuffle.
 6. **Cache TTLs** are hardcoded in the `api()` call sites — reasonable defaults, tune if
    category data ever feels stale (e.g. after mass uploads).
 7. **`categories.txt`** seeds are unchanged since March — could add new "Best of" seeds.
+8. **Remaining mobile gaps (issue #17's umbrella, still open):** no touch
+   video preview (taps navigate to Commons), no STL touch orbit, and tap
+   targets below 44px in the treebar/crumbs rows. The collapsing header is
+   shipped; a real-device pass + these touches belong in a follow-up mobile
+   UX issue.
 
 ## Next features (staged plan, all API-verified)
 
