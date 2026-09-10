@@ -54,6 +54,11 @@ async page => {
   };
 
   await page.goto(BASE + "/?sort=alpha&view=det&cat=Category%3ASTL%20files&size=m&_=" + Date.now());
+  // Pin the viewport BEFORE goto: this suite is written against a wide desktop
+  // layout (parkMouse parks at x=640 — "top header zone"; step 2's sentinel
+  // reach assumes 4-column tiles). The shared browser session may carry any
+  // size from another spec, so the suite must own its own.
+  await page.setViewportSize({ width: 1280, height: 720 });
   await page.waitForSelector(".group", { timeout: 60000 });
   // Pointer-event spy for post-mortem diagnostics (step 6 failures).
   await page.evaluate(() => {

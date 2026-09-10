@@ -131,3 +131,31 @@
 /* STL loading overlay — toggled via .show (avoids Tailwind hidden/flex order) */
 .stl-loading { display: none; }
 .stl-loading.show { display: flex; }
+
+/* Scroll-aware collapsing header (issue #17) — transform-only so the masonry
+ * grid never reflows: the sticky band pins to the viewport top and slides out
+ * on downward scroll (translateY(-100%) = fully off-screen, content flows into
+ * the freed region), then back in on upward scroll or a top-edge tap. */
+.cv-header {
+  transition: transform 240ms ease-out;
+  will-change: transform;
+}
+
+.cv-header.cv-header-collapsed {
+  transform: translateY(-100%);
+  box-shadow: none;
+}
+
+/* Touch targets in the controls row on touch devices (iOS convention ≥44px;
+ * 40px keeps the toggle pills from ballooning — the row itself still gains
+ * height so the whole band feels tappable). Pointer-coarse = touch primary. */
+@media (pointer: coarse) {
+  #app-header button:not(#sort-toggle):not(#view-toggle),
+  #app-header select,
+  #app-header input {
+    min-height: 40px;
+  }
+  #app-header button:not(#sort-toggle):not(#view-toggle) {
+    min-width: 40px;
+  }
+}

@@ -7,6 +7,13 @@
  * Breadcrumb trail (v1.9): path= URL param, pushState/popstate history walk.
  * List mode + type filter (v1.11): feed from PagePile (?pile=), PetScan query
  * (?psid= or ?pet=&petdepth=), and ?type= media-type filter; category roulette.
+ * Scroll-aware collapsing header (v1.14): the sticky band slides out after
+ * ~100px of downward scroll (transform-only — no grid reflow), returns on
+ * upward scroll or a top-edge tap (issue #17).
+ * Case-exact category guard (v1.14.1): CirrusSearch incategory:/deepcategory:
+ * match category titles case-insensitively, so shuffle/deep draws can leak
+ * members of a wrong-case doppelgänger (Chop Suey vs Chop suey); drawn pages
+ * are verified against their own category list (exact title) before render.
  * Replaces the PyScript/Pyodide runtime (2026.1.1).
  * Same public URL contract: ?cat=<Category>&sort=alpha|shuffle&view=det|min
  * Same localStorage key: vibe_config
@@ -27,7 +34,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const UA_NOTE = "CommonsVibeExplorer/1.13.1 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
+const UA_NOTE = "CommonsVibeExplorer/1.14.1 (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)";
 
 const state = {
   config: "",                    // categories.txt content + session additions
@@ -51,6 +58,7 @@ const state = {
   colCount: 0,                   // live column count
   colHeights: [],                // tracked column heights for shortest-col place
   deepWalk: null,                // in-flight/resolved subtree walk (deep mode)
+  deepPool: null,               // resolved walk pool — exact-case filter set for deep draws
   requestId: 0,                  // stale-response guard
   abort: new AbortController(),
 };
@@ -645,6 +653,7 @@ async function deepSampleTitles() {
     state.deepWalk = collectSubtree(state.currentCategory).catch(() => null);
   }
   const pool = await Promise.race([state.deepWalk, sleep(800).then(() => null)]);
+  if (pool) state.deepPool = pool; // first resolved walk → exact filter set for deep draws
   if (!pool) return fallbackDraw();
   const weighted = pool.filter((n) => n.files > 0);
   if (!weighted.length) return fallbackDraw();
@@ -703,27 +712,75 @@ async function drawSpread(weighted, exclude) {
   return shuffle(draws.flat());
 }
 
+/* ---------------- case-exact category guard (CirrusSearch is case-insensitive) ---------------- */
+
+// MediaWiki category titles are case-sensitive beyond the first character —
+// "Category:Chop Suey" (a Hopper painting) and "Category:Chop suey" (the
+// food) are DIFFERENT categories. But CirrusSearch's incategory:/deepcategory:
+// keywords match case-insensitively (observed live 2026-09-09: incategory:"Chop
+// Suey" returns members of BOTH — 18 hits), so shuffle/deep draws leak members
+// of a wrong-case doppelgänger into the feed. Every drawn page already carries
+// its OWN category list (prop=categories on the same info call), so verify
+// exact membership before rendering: files really in the target pass (even if
+// they also sit in a wrong-case twin); files only in the twin are dropped.
+const exactCatTitle = (t) => String(t).replace(/_/g, " ").trim();
+function inCategory(page, targetTitle) {
+  return (page.categories || []).some((c) => exactCatTitle(c.title) === exactCatTitle(targetTitle));
+}
+
+// Filter a drawn batch by exact membership — mode-aware:
+//  - shuffle: the drawn file must be a member of the current category (exact).
+//  - deep: must be a member of the walked subtree (exact titles). state.deepPool
+//    is null while the walk is still running, when the deepcategory fallback
+//    passes through unfiltered — a transient cold-start window only (once the
+//    walk lands — usually under a second for cached/typical trees — every
+//    batch is filtered). Filtering the fallback against the root alone would
+//    hide legitimate subcategory files from big cold-start trees; the residual
+//    leak is bounded by the walk, and the fallback rarely fires at all.
+function filterShufflePages(pages) {
+  if (state.deepMode) {
+    const pool = state.deepPool;
+    if (!pool) return pages;
+    const set = new Set(pool.map((n) => exactCatTitle(n.title)));
+    return pages.filter((p) => (p.categories || []).some((c) => set.has(exactCatTitle(c.title))));
+  }
+  return pages.filter((p) => inCategory(p, state.currentCategory));
+}
+
+// The shared 12-title imageinfo batch for drawn titles (shuffle, deep, and the
+// starve fallback all fetch the same props — see HANDOFF's iiprop gotcha).
+async function batchInfo(titles) {
+  const info = await api({
+    action: "query",
+    titles: titles.join("|"),
+    prop: "imageinfo|videoinfo|categories",
+    clprop: "hidden",
+    cllimit: "max",
+    iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiextmetadatafilter: "ImageDescription|ObjectName",
+    viprop: "url|derivatives",
+    iiurlwidth: "480",
+  });
+  return (info.query && info.query.pages) || [];
+}
+
 async function fetchBatch() {
   if (state.list) return listBatch();
   if (state.sortShuffle) {
     // Shuffle: random draw + one batched info call. Never cached (serendipity).
-    const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
-    let pages = [];
-    if (titles.length) {
-      const info = await api({
-        action: "query",
-        titles: titles.join("|"),
-        prop: "imageinfo|videoinfo|categories",
-        clprop: "hidden",
-        cllimit: "max",
-        iiprop: "url|extmetadata|derivatives|mediatype|mime",
-        iiextmetadatafilter: "ImageDescription|ObjectName",
-        viprop: "url|derivatives",
-        iiurlwidth: "480",
-      });
-      pages = (info.query && info.query.pages) || [];
-      shuffle(pages);
+    const draw = () => (state.deepMode ? deepSampleTitles() : flatSampleTitles());
+    let titles = await draw();
+    let pages = titles.length ? filterShufflePages(await batchInfo(titles)) : [];
+    // A whole batch CAN come back as wrong-case lookalikes (only the twin's
+    // members — e.g. 12 food photos drawn for the Chop Suey painting). Redraw
+    // a few times so the real members surface, then end when genuinely
+    // exhausted (the painting category holds 2 files, the food twin 16).
+    for (let attempt = 0; attempt < 2 && !pages.length; attempt++) {
+      titles = await draw();
+      if (!titles.length) break;
+      pages = filterShufflePages(await batchInfo(titles));
     }
+    shuffle(pages);
     return { pages, hasEnded: pages.length === 0 };
   }
 
@@ -1799,22 +1856,11 @@ async function filteredMatchCount() {
 // empty draw ends the feed once every match has been shown.
 async function filteredDrawBatch() {
   const titles = await flatSampleTitles();
-  let pages = [];
-  if (titles.length) {
-    const info = await api({
-      action: "query",
-      titles: titles.join("|"),
-      prop: "imageinfo|videoinfo|categories",
-      clprop: "hidden",
-      cllimit: "max",
-      iiprop: "url|extmetadata|derivatives|mediatype|mime",
-      iiextmetadatafilter: "ImageDescription|ObjectName",
-      viprop: "url|derivatives",
-      iiurlwidth: "480",
-    });
-    pages = (info.query && info.query.pages) || [];
-    shuffle(pages);
-  }
+  // Same wrong-case guard as the shuffle draws — the starve-fallback must only
+  // surface files REALLY in the current category (exact title).
+  let pages = titles.length ? await batchInfo(titles) : [];
+  pages = pages.filter((p) => inCategory(p, state.currentCategory));
+  shuffle(pages);
   return { pages, hasEnded: pages.length === 0 };
 }
 
@@ -1881,6 +1927,7 @@ function resetAndFetch() {
   state.requestId++;
   treeReqId++;               // any open tree render belongs to the old category
   state.deepWalk = null;     // deep sampler walks the new category's tree
+  state.deepPool = null;     // seeded exact-filter set for deep draws
   state.lastDeepPicks = new Set();
   state.abort.abort();
   state.abort = new AbortController();
@@ -2057,6 +2104,86 @@ function handleViewToggle() {
   updateURL();
 }
 
+/* ---------------- scroll-aware collapsing header (issue #17) ---------------- */
+
+// Mobile-first (and touch-only by design): on coarse-pointer devices the sticky
+// header band hides once the user scrolls down a ways (the masonry gets the
+// full viewport), and returns on upward scroll or a tap in the top-edge region
+// — the Pinterest/Instagram pattern. Implemented with a transform ONLY
+// (translateY(-100%) on the pinned sticky band): no reflow, no scroll-position
+// feedback loop, the grid never moves. Scroll sampling is rAF-throttled with a
+// per-frame direction dead-zone so jitter and iOS bounce-back never flicker
+// the band. Desktop (fine pointer) keeps the always-visible band — unchanged
+// behavior, and the desktop STL suite depends on the header zone staying put.
+const COARSE_POINTER =
+  typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+const HEADER_HIDE_PX = 100;  // collapse once scrolled past this (issue spec ~100px)
+const HEADER_DIR_DELTA = 8;  // direction hysteresis: ignore sub-8px per-frame jitter
+const HEADER_TAP_ZONE = 48;  // top-edge tap-to-expand region (px)
+const headerEl = $("app-header");
+let headerCollapsed = false;
+let lastHeaderScrollY = 0;
+let headerScrollTicking = false;
+
+function setHeaderCollapsed(collapsed) {
+  if (headerCollapsed === collapsed) return;
+  headerCollapsed = collapsed;
+  headerEl.classList.toggle("cv-header-collapsed", collapsed);
+}
+
+// Scroll sampling — rAF-throttled, passive listener, the only layout read is
+// scrollY. Skipped while a modal overlay is open (fixed overlays cover the
+// header and own their scroll context — collapse state must never fight them).
+function updateHeaderCollapse() {
+  if (document.querySelector(".modal-overlay:not(.hidden)")) {
+    lastHeaderScrollY = window.scrollY;
+    return;
+  }
+  const y = window.scrollY;
+  const dy = y - lastHeaderScrollY;
+  lastHeaderScrollY = y;
+  if (!headerCollapsed) {
+    if (y > HEADER_HIDE_PX && dy > HEADER_DIR_DELTA) setHeaderCollapsed(true);
+  } else if (y <= HEADER_HIDE_PX || dy < -HEADER_DIR_DELTA) {
+    setHeaderCollapsed(false);
+  }
+}
+
+function onHeaderScroll() {
+  if (headerScrollTicking) return;
+  headerScrollTicking = true;
+  requestAnimationFrame(() => {
+    headerScrollTicking = false;
+    updateHeaderCollapse();
+  });
+}
+
+// Top-edge tap-to-expand — the standard mobile escape hatch when the scroll
+// direction is ambiguous. Capture-phase while collapsed: taps in the top N px
+// expand the band; the pointerdown is prevented/stopped AND the trailing click
+// of the same gesture is swallowed too (the band is mid-slide, so hit-testing
+// hasn't caught up — without this the click would activate the tile underneath
+// and open its Commons page).
+let tapZoneArmedAt = 0; // ms timestamp of the swallowed pointerdown gesture
+function onHeaderTapZone(e) {
+  if (e.type === "pointerdown") {
+    if (document.querySelector(".modal-overlay:not(.hidden)")) return;
+    if (e.clientY > HEADER_TAP_ZONE) return;
+    if (!headerCollapsed) return;
+    setHeaderCollapsed(false);
+    e.preventDefault();
+    e.stopPropagation();
+    tapZoneArmedAt = Date.now();
+    return;
+  }
+  // click — swallow the trailing click of a just-swallowed tap gesture.
+  if (e.clientY <= HEADER_TAP_ZONE && tapZoneArmedAt && Date.now() - tapZoneArmedAt < 700) {
+    tapZoneArmedAt = 0;
+    e.preventDefault();
+    e.stopPropagation();
+  }
+}
+
 /* ---------------- boot ---------------- */
 
 async function init() {
@@ -2156,6 +2283,16 @@ async function init() {
     btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
   }
   window.addEventListener("resize", handleResize);
+  // Scroll-aware collapsing header (issue #17): touch-only by design — the
+  // desktop layout never hides its chrome (and the STL suite parks its mouse
+  // in the header zone). rAF-throttled passive scroll sampling + capture-phase
+  // tap-zone swallow (see onHeaderTapZone).
+  lastHeaderScrollY = window.scrollY;
+  if (COARSE_POINTER) {
+    window.addEventListener("scroll", onHeaderScroll, { passive: true });
+    window.addEventListener("pointerdown", onHeaderTapZone, true);
+    window.addEventListener("click", onHeaderTapZone, true);
+  }
   // Chip navigation (treebar chips + tree rows + crumbs) via delegation.
   document.body.addEventListener("click", (e) => {
     const chip = e.target.closest("[data-cat]");
