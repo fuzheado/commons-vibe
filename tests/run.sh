@@ -18,6 +18,12 @@ bash tests/version-consistency.sh || {
   exit 1
 }
 
+echo "▶ Running viewer spec (issue #23 — in-app media viewer, no new tabs)..."
+playwright-cli run-code --filename=tests/viewer.spec.js >/dev/null 2>&1 && echo "✔ viewer spec: all assertions pass" || {
+  echo "✘ viewer spec failed — run 'playwright-cli run-code --filename=tests/viewer.spec.js' for details"
+  exit 1
+}
+
 echo "▶ Running header-collapse spec (issue #17, touch context)..."
 playwright-cli run-code --filename=tests/header-collapse.spec.js >/dev/null 2>&1 && echo "✔ header-collapse spec: all assertions pass" || {
   echo "✘ header spec failed — run 'playwright-cli run-code --filename=tests/header-collapse.spec.js' for details"

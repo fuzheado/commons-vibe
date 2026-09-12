@@ -11,6 +11,19 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## Current state (updated 2026-09-11, v1.14.1 deployed)
 
+- **2026-09-11 — IN-APP MEDIA VIEWER PROTOTYPE (issue #23, Phase 1) — branch only, NOT deployed:**
+  clicking a tile now opens the file in a `#viewer-modal` instead of a Commons tab:
+  media stage (image/video/audio/STL poster) + a details rail (description, artist,
+  credit, date, license + link, usage terms, file facts, all categories as
+  clickable teleport pills, and an auto-built attribution line), prev/next through
+  the feed, `Esc`/`←`/`→` keys, and `?file=` deep links with Back-to-close.
+  **Tiles stay real anchors**: only an unmodified left-click is intercepted, so
+  Ctrl/Cmd-click, middle-click and right-click → Copy link address keep working
+  (deliberately no "viewer vs new tab" toggle — see issue #23). Metadata comes
+  from its own single-title call with a targeted `iiextmetadatafilter` (11 keys,
+  ~1.9 KB) because the feed's 2-key trim is a deliberate ~3× win; the batch call
+  sites are untouched. Regression: `tests/viewer.spec.js` (36 assertions, green).
+  Not yet done: SDC/depicts, EXIF, globalusage, kiosk mode, PDF/DjVu, swipe.
 - **2026-09-11 — public-dir exposure closed, version guard, branch cleanup (chore):**
   `.htaccess` was never in effect on the live host (Toolforge's lighttpd ignores it),
   so `HANDOFF.md`, `README.md`, `PRD.md`, `DEPLOY.md`, `GEMINI.md` and
@@ -115,11 +128,15 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&pile=|&psid=|&pet=&petdepth=]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&file=<File:Name.ext>][&pile=|&psid=|&pet=&petdepth=]`.
+  `file=` opens the in-app viewer on that file (issue #23 prototype); it is added
+  with `pushState` so browser Back closes the viewer, and dropped on close. The
+  popstate handler distinguishes a viewer-only history move from a real navigation
+  and skips the feed refetch in that case.
   `type=` filters the feed client-side (alpha/list) and server-side (shuffle/deep
   append CirrusSearch `filetype:` terms). `pile=`/`psid=`/`pet=` activate **list
   mode**: the feed renders an external file list instead of a category
@@ -420,8 +437,32 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   Exiting: click any category pill (navigateTo clears state.list), or navigate
   via search/dropdown.
 
-### 3D STL viewer (feature branch)
+### In-app media viewer (issue #23, Phase 1 prototype)
 
+- `installViewerInterception()` — the single delegated click interceptor. It fires
+  only for `button === 0` with no modifier keys, only on `a.media-link` /
+  `a.card-info-link`, and never when the target is an active `.stl-canvas` (spinning a
+  model isn't a navigation gesture). Modifier/middle-clicks fall through to the
+  anchor's native new-tab behaviour; `View Source ↗` is deliberately NOT intercepted.
+- `openViewer(title)` / `closeViewer()` / `viewerStep(±1)` / `syncViewerFromURL()` —
+  modal lifecycle, feed-order prev/next (`card.dataset.file`), and the URL ⇄ viewer
+  sync the popstate handler calls.
+- `fetchViewerMeta(title)` — its own single-title `imageinfo|videoinfo|categories`
+  call with the 11-key `VIEWER_META_KEYS` filter + `iiurlwidth=1600`, `ttl` 7d, plus a
+  session Map. The three feed call sites keep their 2-key filter (deliberate ~3× win).
+  `feedQSFromQS()` — the query string without `file=` — is what lets popstate skip a
+  feed refetch when only the viewer changed.
+- `viewerMediaHtml()` / `viewerDetailsHtml()` / `renderViewer()` — per-type stage
+  (image / video+controls / audio / STL poster + explicit "Load 3D model" gesture)
+  and the details rail incl. the auto-built attribution line.
+- STL reuse: the viewer calls `activateStl($("viewer-media"), box, url)` and
+  `closeViewer()` calls `deactivateStl` so `window.__cvStl.registry` stays clean.
+- **Anchor invariant (do not "simplify"):** the tiles must stay real `<a href=…
+  target="_blank">` anchors. Replacing them with buttons silently kills middle-click,
+  Ctrl/Cmd-click, right-click → Copy link address, and the status-bar URL preview —
+  and it is the whole reason no viewer/tab toggle is needed.
+
+### 3D STL viewer (feature branch)
 - `activateStl(card, mediaBox, url)` / `deactivateStl` / `disposeStlEntry` / `parseBinaryStl` / `ensureStlLib` — hover-to-spin 3D for `application/sla` (mediatype `3D`) tiles. Server thumbs stay as posters; a **150ms dwell gate** on pointerenter (scroll fly-overs never activate), then lazy `import("three")` + fetch of the raw STL (bytes cached per URL — re-hover instant), binary parse (ASCII/unparseable → poster kept), flat-shaded MeshStandardMaterial + hemisphere/directional lights, OrbitControls with auto-rotate until first grab.
 - **Constraints that shaped it:** upload.wikimedia.org sends `access-control-allow-origin: *` on raw file bytes (verified 2026-09-04 — the skills-table "no CORS" row is outdated for file media), so no proxy is needed; Toolforge CSP blocks CDN scripts → vendor same-origin; `forceContextLoss()` is deliberately NOT used — rapid create/loss cycles wedge later context creation in Chromium.
 - **Size tiers (2026-09-07):** streamed downloads with live progress in the
