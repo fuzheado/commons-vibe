@@ -11,6 +11,16 @@ Live at **https://commons-vibe.toolforge.org/**.
 
 ## Current state (updated 2026-09-11, v1.14.1 deployed)
 
+- **2026-09-11 — public-dir exposure closed, version guard, branch cleanup (chore):**
+  `.htaccess` was never in effect on the live host (Toolforge's lighttpd ignores it),
+  so `HANDOFF.md`, `README.md`, `PRD.md`, `DEPLOY.md`, `GEMINI.md` and
+  `.idx/airules.md` were publicly readable. Each was hash-matched to a git revision
+  first (nothing unique lost), then deleted from `public_html` — all now return 404
+  while the app files still return 200. Added `tests/version-consistency.sh` (a
+  4-site version guard, wired first in `run.sh`) so the v1.11-vs-v1.14.1 drift cannot
+  return silently. Pruned 12 merged branches on `origin` and 10 locally — only `main`
+  remains. `vendor/` was also missing from the documented deploy list (it ships
+  three.js, which the STL viewer imports) — added, and verified in parity.
 - **2026-09-11 — version single-source (chore):** the app version had drifted across
   three sites — the footer badge and the `app.js` header comment said **v1.11** while
   `UA_NOTE` (boot log) already said v1.14.1. Fix: `const VERSION = "1.14.1"` in
@@ -100,12 +110,12 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `categories.txt` | Seed category list. Format per line: `Category:Name | Label` (label optional). |
 | `README.md` / `PRD.md` / `DEPLOY.md` / `AGENTS.md` | Project docs. `AGENTS.md` = agent working rules (renamed from `GEMINI.md` on 2026-09-10 — the name only ever meant "Gemini reads this"). |
 | `LICENSE` | MIT (Toolforge rule: OSI license required). |
-| `.htaccess` | **Inert on the live host** (verified 2026-09-10: the file itself returns HTTP 200 and `/HANDOFF.md` is publicly readable, so Toolforge's lighttpd static serving ignores it). Kept for a future Apache-style host. `*.txt` must stay servable (app fetches `categories.txt`), so any real `*.md` block must exclude `*.txt`. |
+| `.htaccess` | **Inert on the live host** — Toolforge serves `public_html` via lighttpd, which ignores it (verified 2026-09-10: the file itself returns HTTP 200). The `*.md` docs it was meant to block were **deleted from `public_html` on 2026-09-11** (all now 404), so the effective rule is "never copy `*.md` into `public_html`". Kept for a future Apache-style host. `*.txt` must stay servable (app fetches `categories.txt`), so any real `*.md` block must exclude `*.txt`. |
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (both specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
 
 ## URL contract & persistence (do not break)
 
@@ -235,8 +245,19 @@ Tool: `commons-vibe`, webservice `php8.4` (Kubernetes), files in
 # per file — pipe-through-sudo keeps ownership tools.commons-vibe
 cat index.html | ssh alih@dev.toolforge.org \
   'sudo -niu tools.commons-vibe sh -c "cat > /data/project/commons-vibe/public_html/index.html"'
-# ...repeat for app.js style.css categories.txt .htaccess (docs: README PRD AGENTS DEPLOY)
+# ...repeat for app.js style.css categories.txt .htaccess
+# vendor/ ships with the app (three.js r170 — the STL viewer imports it, and the
+# Toolforge CSP blocks CDN module imports). It is required on a fresh deploy and
+# after any vendor bump, not just on file edits. Same cat-pipe pattern:
+cat vendor/three.module.min.js | ssh alih@dev.toolforge.org \
+  'sudo -niu tools.commons-vibe sh -c "mkdir -p /data/project/commons-vibe/public_html/vendor && cat > /data/project/commons-vibe/public_html/vendor/three.module.min.js"'
+# ...same for vendor/OrbitControls.js and vendor/LICENSE
 ```
+
+**Never copy `*.md` into `public_html`** — lighttpd ignores `.htaccess`, so they would
+be world-readable. The served directory must contain exactly `index.html`, `app.js`,
+`style.css`, `categories.txt`, `.htaccess` and `vendor/` (stale doc copies were
+removed 2026-09-11 — see open item 9).
 
 Verify after deploy:
 ```bash
@@ -536,6 +557,11 @@ fine for a snapshot feature, wrong for a live shuffle.
 1. **Server git checkout is stale** — `/data/project/commons-vibe/public_html/.git` is an
    orphaned March checkout (FETCH_HEAD `f3e0b71`; HEAD on a dead `master` ref).
    Deploys are direct file copies. Either re-init it for git deploys or delete it.
+   **Escalated 2026-09-11:** the whole checkout is web-readable — `/.git/config`
+   (236 B, leaks no credentials — just the public GitHub remote URL), `/.git/HEAD`
+   and `/.git/index` all return HTTP 200. With the `*.md` docs now deleted from
+   `public_html`, this is the last unintended public surface besides the two
+   dashboard dirs above.
 2. **Stray public dirs:** `/articletopic-dashboard/` and `/stats-dashboard/` in
    `public_html` are served publicly but not in the repo — delete, archive, or fold in.
 3. **Mobile video:** tapping a tile navigates to Commons (no touch preview). The old
@@ -554,14 +580,16 @@ fine for a snapshot feature, wrong for a live shuffle.
    shipped; a real-device pass + these touches belong in a follow-up mobile
    UX issue.
 
-9. **All `*.md` docs are publicly served.** The Toolforge host serves
-   `public_html` as static files via lighttpd and ignores `.htaccess`, so
-   `HANDOFF.md` (this file), `README.md`, `PRD.md`, `DEPLOY.md`, `AGENTS.md` and
-   `.idx/airules.md` are all readable at
-   `https://commons-vibe.toolforge.org/<file>.md` (verified 2026-09-10 — plain
-   files return 200, a nonexistent `*.md` returns 404). Either accept it and keep
-   these files free of credentials/private data, or move the notes out of
-   `public_html` and keep only the app + `categories.txt` there.
+9. ~~**All `*.md` docs are publicly served.**~~ **Resolved 2026-09-11:** the public
+   copies (`HANDOFF.md`, `README.md`, `PRD.md`, `DEPLOY.md`, `GEMINI.md`,
+   `.idx/airules.md`) were deleted from `public_html`; all six now return 404 and
+   the app files still return 200 (verified live). Every deleted file was
+   hash-matched to a git revision *before* deletion (HANDOFF/README → `65e2cc8`,
+   PRD/DEPLOY/GEMINI → `77a3e93`), so nothing unique was lost; a local backup also
+   sits in the gitignored `cache/public-html-md-backup/`. **Rule going forward:
+   never copy `*.md` into `public_html`** (see the deploy section and `AGENTS.md`).
+   Root cause: Toolforge serves `public_html` via lighttpd, which ignores the
+   repo's `.htaccess` — the old "blocked from web" note was never true.
 
 ## Next features (staged plan, all API-verified)
 

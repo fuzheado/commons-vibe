@@ -1,13 +1,22 @@
 #!/bin/bash
-# TDD runner for the 3D STL viewer.
+# TDD runner for the 3D STL viewer, plus the version-consistency guard.
 #
-#   tests/run.sh          → spec, then (on green) the recorded video tour
+#   tests/run.sh          → guard, specs, then (on green) the recorded video tour
 #
-# Requires: local server on :8123 (python3 -m http.server 8123)
+# Requires: a local server on :8123 (python3 -m http.server 8123) AND an open
+#           playwright browser in the default session (`playwright-cli open`) —
+#           the specs run via `playwright-cli run-code`, which needs one.
+#           The version guard is static and needs neither.
 # Artifacts: tests/artifacts/stl-3d-tour.webm (final passing artifact)
 #            tests/artifacts/tour-*.png (chapter screenshots)
 set -e
 cd "$(dirname "$0")/.."
+
+echo "▶ Running version-consistency guard (static, no browser)..."
+bash tests/version-consistency.sh || {
+  echo "✘ version guard failed — the app version disagrees across app.js/index.html"
+  exit 1
+}
 
 echo "▶ Running header-collapse spec (issue #17, touch context)..."
 playwright-cli run-code --filename=tests/header-collapse.spec.js >/dev/null 2>&1 && echo "✔ header-collapse spec: all assertions pass" || {

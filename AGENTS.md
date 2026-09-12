@@ -71,11 +71,27 @@ localStorage keys.
 - `.idx/` — legacy Firebase Studio dev-env config, not app code. Note: Gemini
   *in Firebase Studio* reads `.idx/airules.md`, not this file.
 
-## These docs are publicly readable
+## The public web directory holds app files only
 
-The Toolforge host serves `public_html` as plain static files and does **not**
-honour `.htaccess` — the file is itself served (HTTP 200, verified 2026-09-10),
-and every `*.md` here (including `HANDOFF.md`) is live at
-`https://commons-vibe.toolforge.org/<file>.md`. Treat all of these files as
-public: no credentials, tokens, or private contact details, and keep server
-paths / deploy commands to what's already disclosed.
+The Toolforge host serves `public_html` as plain static files via lighttpd and
+does **not** honour `.htaccess` (the file is itself served, HTTP 200 — verified
+2026-09-10), so anything copied into `public_html` is world-readable.
+
+**Never copy these `*.md` docs into `public_html`.** Stale copies used to be
+served there; they were deleted on 2026-09-11 (`HANDOFF.md`, `README.md`,
+`PRD.md`, `DEPLOY.md`, `GEMINI.md`, `.idx/airules.md` — all now 404). Each was
+hash-matched to a git revision before deletion, so nothing was lost. The served
+directory holds exactly: `index.html`, `app.js`, `style.css`, `categories.txt`,
+`.htaccess`, `vendor/`.
+
+Treat these files as publishable anyway — they live on GitHub, so keep
+credentials, tokens, and private contact details out of them. Note the stale
+`public_html/.git/` checkout is still web-readable (see open item 1 in
+`HANDOFF.md`).
+
+## Versioning
+
+`const VERSION` in `app.js` is the single source of truth. `UA_NOTE` interpolates
+it and `init()` writes the footer badge from it; `index.html` keeps a static
+fallback for the no-JS case. Bump `VERSION` only. `tests/version-consistency.sh`
+enforces that all four sites agree and runs first in `tests/run.sh`.
