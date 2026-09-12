@@ -1,3 +1,7 @@
+# NOTE (verified 2026-09-10): Toolforge serves public_html as static files via
+# lighttpd, which does NOT read .htaccess — the directives below are inert there
+# (the .htaccess file itself is served: HTTP 200, and every *.md is readable).
+# Kept for any future Apache-style host.
 # Prevent the web from seeing Markdown files
 <FilesMatch "\.(md)$">
     Order allow,deny

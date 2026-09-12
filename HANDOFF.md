@@ -80,7 +80,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 - **Deployed:** Live site is byte-identical to GitHub `main` (verified via SHA256,
   local ↔ server ↔ live web). Both production bugs found during the rewrite are fixed
   live (see below).
-- **Docs:** README, PRD, GEMINI.md, DEPLOY.md all reflect the JS engine.
+- **Docs:** README, PRD, AGENTS.md, DEPLOY.md all reflect the JS engine.
 
 ## Repo layout
 
@@ -90,9 +90,9 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `app.js` | The whole app (ES module, ~700 lines). |
 | `style.css` | Custom CSS (drawer, minimal-mode overlay, toggles). Unchanged from PyScript era. |
 | `categories.txt` | Seed category list. Format per line: `Category:Name | Label` (label optional). |
-| `README.md` / `PRD.md` / `DEPLOY.md` / `GEMINI.md` | Project docs. GEMINI.md = agent rules (JS-era). |
+| `README.md` / `PRD.md` / `DEPLOY.md` / `AGENTS.md` | Project docs. `AGENTS.md` = agent working rules (renamed from `GEMINI.md` on 2026-09-10 — the name only ever meant "Gemini reads this"). |
 | `LICENSE` | MIT (Toolforge rule: OSI license required). |
-| `.htaccess` | Blocks `*.md` from web; 404s `.idx`. NOTE: `*.txt` must stay servable (app fetches `categories.txt`). |
+| `.htaccess` | **Inert on the live host** (verified 2026-09-10: the file itself returns HTTP 200 and `/HANDOFF.md` is publicly readable, so Toolforge's lighttpd static serving ignores it). Kept for a future Apache-style host. `*.txt` must stay servable (app fetches `categories.txt`), so any real `*.md` block must exclude `*.txt`. |
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
@@ -227,7 +227,7 @@ Tool: `commons-vibe`, webservice `php8.4` (Kubernetes), files in
 # per file — pipe-through-sudo keeps ownership tools.commons-vibe
 cat index.html | ssh alih@dev.toolforge.org \
   'sudo -niu tools.commons-vibe sh -c "cat > /data/project/commons-vibe/public_html/index.html"'
-# ...repeat for app.js style.css categories.txt .htaccess (docs: README PRD GEMINI DEPLOY)
+# ...repeat for app.js style.css categories.txt .htaccess (docs: README PRD AGENTS DEPLOY)
 ```
 
 Verify after deploy:
@@ -250,13 +250,19 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - **Media detection:** use `mediatype`/`mime` fields, NOT URL suffixes (this broke video
   rendering in the old PyScript build). Derivative `type` may be
   `video/webm; codecs="vp9, opus"` — split on `;` before comparing.
-- **Case/underscore:** Commons treats `_` and spaces as equivalent. Compare with
-  `normCat()` (spaces + lowercase). The old editor rejected underscore categories as
-  invalid — that bug is fixed.
+- **Case/underscore — TWO normalizations, on purpose.** `normCat()` (spaces +
+  lowercase) is for URL/state and cache keys, where both spellings *should* collapse.
+  Feed **membership** must use `exactCatTitle()` / `inCategory()` /
+  `filterShufflePages()`: CirrusSearch `incategory:`/`deepcategory:` match titles
+  case-insensitively while Commons does not, so normalizing feed results with
+  `normCat()` is exactly the v1.14.1 Chop Suey leak. (Commons does treat `_` and
+  spaces as equivalent; the old editor's rejection of underscore categories is fixed.)
 - **Format:** `formatversion=2` everywhere (pages are arrays). `origin=*` for CORS.
 - **Batching:** max 50 titles per query; editor validation chunks at 50.
-- **Caching:** `{ttl: N}` enables the localStorage cache. NEVER cache shuffle searches
-  (`{ttl: 0}`) — serendipity dies. Alpha batches: 24h; categoryinfo/validation: 7d.
+- **Caching:** `api()`'s default is `ttl: 0` = uncached — *omitting* `ttl` is what
+  keeps shuffle/deep/roulette draws un-cached, so never add one there (serendipity
+  dies). `{ttl: N}` enables the localStorage cache: alpha batches 24h,
+  categoryinfo/validation 7d.
 - **Retry/abort:** 429/5xx retried with exponential backoff (max 4 attempts — api()
   then throws "API retries exhausted" rather than returning undefined); every reset
   aborts in-flight fetches (`state.abort`) and bumps `state.requestId`. apiThrottle()
@@ -540,6 +546,15 @@ fine for a snapshot feature, wrong for a live shuffle.
    shipped; a real-device pass + these touches belong in a follow-up mobile
    UX issue.
 
+9. **All `*.md` docs are publicly served.** The Toolforge host serves
+   `public_html` as static files via lighttpd and ignores `.htaccess`, so
+   `HANDOFF.md` (this file), `README.md`, `PRD.md`, `DEPLOY.md`, `AGENTS.md` and
+   `.idx/airules.md` are all readable at
+   `https://commons-vibe.toolforge.org/<file>.md` (verified 2026-09-10 — plain
+   files return 200, a nonexistent `*.md` returns 404). Either accept it and keep
+   these files free of credentials/private data, or move the notes out of
+   `public_html` and keep only the app + `categories.txt` there.
+
 ## Next features (staged plan, all API-verified)
 
 Category-tree exploration — **Stage A + B core shipped in v1.6** (treebar, tree
@@ -568,7 +583,10 @@ accounts, natural-language search, filetype filtering.
 
 - Keep the URL contract, localStorage keys, and UI behavior stable — shareable links
   are the product.
-- All API calls through `api()`; all category comparisons through `normCat()`.
+- All Action API calls through `api()`; `normCat()` for URL/state and cache keys,
+  `exactCatTitle()`/`inCategory()` for feed membership (see API rules above).
 - Test locally first (checklist above), then deploy + verify with SHA256.
-- GEMINI.md contains the agent-workflow rules (concise responses, no big refactors
-  unless asked, JS not Python).
+- `AGENTS.md` (renamed from `GEMINI.md`, 2026-09-10) holds the agent-workflow rules:
+  concise responses, no big refactors unless asked, JS not Python, plus the
+  two-normalization rule. This file stays the single source of truth for project
+  facts — don't duplicate them into `AGENTS.md`.
