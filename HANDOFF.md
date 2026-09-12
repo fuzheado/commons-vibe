@@ -1,6 +1,6 @@
 # CommonsVibe — Project Handoff
 
-_Last updated: 2026-08-27. Read this first if you're continuing work on this project._
+_Last updated: 2026-09-11. Read this first if you're continuing work on this project._
 
 ## What this is
 
@@ -9,8 +9,16 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-09-04, v1.11 deployed)
+## Current state (updated 2026-09-11, v1.14.1 deployed)
 
+- **2026-09-11 — version single-source (chore):** the app version had drifted across
+  three sites — the footer badge and the `app.js` header comment said **v1.11** while
+  `UA_NOTE` (boot log) already said v1.14.1. Fix: `const VERSION = "1.14.1"` in
+  `app.js`; `UA_NOTE` interpolates it and `init()` writes `#app-version` from it, so
+  the footer badge can no longer drift. `index.html` keeps a static `v1.14.1`
+  fallback (renders without JS). **Bump `VERSION` only** — the header comment says
+  so explicitly. Deployed and SHA256-verified local ↔ server ↔ live; live smoke test:
+  12/12 tiles with thumbnails, URL contract intact, 0 console errors.
 - **Deployed:** live site matches `main` (verified via SHA256).
 - **2026-09-09 — scroll-aware collapsing header (v1.14, issue #17):** on
   touch-primary devices (`(pointer: coarse)` — phones/tablets) the sticky
@@ -87,7 +95,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | File | Role |
 |---|---|
 | `index.html` | Thin shell: header controls, masonry columns, category-editor modal. No logic. |
-| `app.js` | The whole app (ES module, ~700 lines). |
+| `app.js` | The whole app (ES module, ~2,400 lines). `VERSION` const at the top is the single source of truth for the displayed version. |
 | `style.css` | Custom CSS (drawer, minimal-mode overlay, toggles). Unchanged from PyScript era. |
 | `categories.txt` | Seed category list. Format per line: `Category:Name | Label` (label optional). |
 | `README.md` / `PRD.md` / `DEPLOY.md` / `AGENTS.md` | Project docs. `AGENTS.md` = agent working rules (renamed from `GEMINI.md` on 2026-09-10 — the name only ever meant "Gemini reads this"). |
