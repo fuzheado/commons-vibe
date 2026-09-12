@@ -1,5 +1,6 @@
 #!/bin/bash
-# TDD runner for the 3D STL viewer, plus the version-consistency guard.
+# TDD runner for the 3D STL viewer, the version-consistency guard, and the
+# category type-ahead combobox.
 #
 #   tests/run.sh          → guard, specs, then (on green) the recorded video tour
 #
@@ -21,6 +22,12 @@ bash tests/version-consistency.sh || {
 echo "▶ Running viewer spec (issue #23 — in-app media viewer, no new tabs)..."
 playwright-cli run-code --filename=tests/viewer.spec.js >/dev/null 2>&1 && echo "✔ viewer spec: all assertions pass" || {
   echo "✘ viewer spec failed — run 'playwright-cli run-code --filename=tests/viewer.spec.js' for details"
+  exit 1
+}
+
+echo "▶ Running category-search spec (type-ahead combobox)..."
+playwright-cli run-code --filename=tests/category-search.spec.js >/dev/null 2>&1 && echo "✔ category-search spec: all assertions pass" || {
+  echo "✘ category-search spec failed — run 'playwright-cli run-code --filename=tests/category-search.spec.js' for details"
   exit 1
 }
 

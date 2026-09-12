@@ -250,6 +250,76 @@
     padding: 10px;
 }
 
+/* ---------------- Category type-ahead (prototype) ----------------
+ * Anchored to the #search-input's relative wrapper. Wider than the input so
+ * category names have room, but capped so it can't run off a phone screen. */
+#search-suggest {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
+    min-width: min(360px, 92vw);
+    max-width: 92vw;
+    max-height: 330px;
+    overflow-y: auto;
+    padding: 4px;
+    background: rgba(9, 9, 11, 0.98);
+    border: 1px solid rgba(63, 63, 70, 0.8);
+    border-radius: 12px;
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(14px);
+    list-style: none;
+    z-index: 60;
+}
+
+.cat-suggest-row {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    padding: 7px 10px;
+    border-radius: 8px;
+    cursor: pointer;
+}
+
+.cat-suggest-row:hover,
+.cat-suggest-row.cat-suggest-active {
+    background: rgba(37, 99, 235, 0.9);
+}
+
+.cat-suggest-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: rgb(244 244 245);
+    overflow-wrap: anywhere;
+}
+
+.cat-suggest-meta {
+    font-size: 9px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgb(161 161 170);
+}
+
+/* Container categories (0 files, N subcats) — flag them so the user does not
+ * land on a feed that legitimately has nothing to show. */
+.cat-suggest-container .cat-suggest-meta {
+    color: rgb(251 191 36);
+}
+
+.cat-suggest-row:hover .cat-suggest-meta,
+.cat-suggest-row.cat-suggest-active .cat-suggest-meta {
+    color: rgba(255, 255, 255, 0.9);
+}
+
+/* Touch devices: the header controls already gain height under (pointer: coarse);
+ * keep suggestion rows comfortably tappable too. */
+@media (pointer: coarse) {
+    .cat-suggest-row {
+        padding: 11px 10px;
+    }
+}
+
 /* Video/Audio Specifics */
 .media-placeholder {
     background-color: #18181b;

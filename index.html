@@ -115,6 +115,10 @@
             <div class="flex flex-wrap items-center justify-center gap-4">
                 <div class="relative">
                     <input id="search-input" type="text" placeholder="Jump to Category..." class="bg-zinc-900 text-[10px] font-bold tracking-widest text-zinc-300 border border-zinc-800 rounded-lg px-4 py-2 w-48 focus:w-64 focus:border-blue-600 outline-none transition-all placeholder:text-zinc-600">
+                    <!-- Category type-ahead (prototype): two-tier suggestions (prefix +
+                         CirrusSearch fuzzy) enriched with file/subcat counts. Populated
+                         by installCategoryAutocomplete() in app.js. -->
+                    <ul id="search-suggest" role="listbox" aria-label="Category suggestions" class="hidden"></ul>
                 </div>
 
                 <div class="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg pr-3">
