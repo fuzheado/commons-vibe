@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.14.1 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.15 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -34,7 +34,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.14.1"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.15"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
