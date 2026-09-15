@@ -9,9 +9,20 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-09-11, v1.14.1 deployed)
+## Current state (updated 2026-09-15, v1.14.1 deployed)
 
-- **2026-09-11 — IN-APP MEDIA VIEWER PROTOTYPE (issue #23, Phase 1) — branch only, NOT deployed:**
+- **2026-09-15 — BOTH FEATURES SHIPPED AND LIVE (v1.14.1 badge):** `feature/in-app-viewer`
+  (PR #24) and `feature/category-autocomplete` (PR #25) are merged to `main` **and
+  deployed** — `index.html`, `app.js`, `style.css` all SHA256-match local = server =
+  live. The two entries below were written while they were still prototypes; they are
+  now production features. Verified live on 2026-09-15: a tile click opens the
+  `#viewer-modal` (9 detail rows, license `CC BY 4.0`, 17 category pills, `Esc` closes,
+  no new tab) and typing `chop suey` offers both `Category:Chop suey` (16 files) and
+  `Category:Chop Suey` (2 files). Merge order mattered: #24 first, then #25 rebased
+  (conflicts in `app.js`, `style.css`, `HANDOFF.md`, `tests/run.sh` — see "Merging the
+  viewer + combobox" below). **The version badge still reads v1.14.1** — neither branch
+  bumped it, so a bump to v1.15 is pending an owner decision.
+- **2026-09-11 — in-app media viewer (issue #23, Phase 1) — SHIPPED:**
   clicking a tile now opens the file in a `#viewer-modal` instead of a Commons tab:
   media stage (image/video/audio/STL poster) + a details rail (description, artist,
   credit, date, license + link, usage terms, file facts, all categories as
@@ -24,8 +35,7 @@ Live at **https://commons-vibe.toolforge.org/**.
   ~1.9 KB) because the feed's 2-key trim is a deliberate ~3× win; the batch call
   sites are untouched. Regression: `tests/viewer.spec.js` (36 assertions, green).
   Not yet done: SDC/depicts, EXIF, globalusage, kiosk mode, PDF/DjVu, swipe.
-- **2026-09-11 — CATEGORY TYPE-AHEAD COMBOBOX PROTOTYPE — this branch
-  (`feature/category-autocomplete`), NOT deployed:** the `Jump to Category` input no
+- **2026-09-11 — category type-ahead combobox — SHIPPED:** the `Jump to Category` input no
   longer demands an exact, correctly-cased title. Two tiers fire in parallel and merge
   as they land — `list=prefixsearch` (~319 ms, 0.9 KB) then CirrusSearch
   `list=search&srnamespace=14` (~1034 ms, 1.0 KB) — enriched with batched
@@ -302,6 +312,25 @@ shasum -a 256 app.js
 curl -s -A "$WIKIMEDIA_USER_AGENT" https://commons-vibe.toolforge.org/app.js | shasum -a 256
 # browser smoke test on the live URL (see checklist above)
 ```
+
+### Merging the viewer + combobox (2026-09-15) — the conflict pattern
+
+Both features insert sections/rows at the **same anchors**, so a plain merge conflicts in
+four files (`app.js`, `style.css`, `HANDOFF.md`, `tests/run.sh`); `index.html`
+auto-merges. The subtlety that costs time: in `app.js`, `style.css` and `tests/run.sh`
+**each side inserts a block whose closing braces were the shared context**, so git emits
+one huge hunk and the resolution must **duplicate the closer once per side** —
+`  });` + `}` for `app.js`, `}` for `style.css`, and `  exit 1` + `}` for `tests/run.sh`.
+Miss it and the app fails to parse or `bash -n tests/run.sh` errors (the STL/viewer
+specs would then fail confusingly). In `HANDOFF.md`: keep both current-state bullets,
+**merge** the two `tests/` table rows into one, and drop the duplicated
+`### 3D STL viewer (feature branch)` heading when stashing both code-map subsections.
+
+Verified recipe (used for the #25 rebase): build and test the composition on a throwaway
+branch first, then resolve the real rebase by taking those files; the rebased tree must be
+**byte-identical** to it (`git diff --quiet <temp> HEAD`) and its
+`git diff --stat origin/main` must show **only the second feature** — no viewer leftovers,
+no duplicated blocks.
 
 ## API integration rules (hard-won gotchas)
 
