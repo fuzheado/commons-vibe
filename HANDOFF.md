@@ -9,7 +9,7 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-09-15, v1.14.1 deployed)
+## Current state (updated 2026-09-15, v1.15 deployed)
 
 - **2026-09-15 — BOTH FEATURES SHIPPED AND LIVE (v1.14.1 badge):** `feature/in-app-viewer`
   (PR #24) and `feature/category-autocomplete` (PR #25) are merged to `main` **and
@@ -20,8 +20,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   no new tab) and typing `chop suey` offers both `Category:Chop suey` (16 files) and
   `Category:Chop Suey` (2 files). Merge order mattered: #24 first, then #25 rebased
   (conflicts in `app.js`, `style.css`, `HANDOFF.md`, `tests/run.sh` — see "Merging the
-  viewer + combobox" below). **The version badge still reads v1.14.1** — neither branch
-  bumped it, so a bump to v1.15 is pending an owner decision.
+  viewer + combobox" below). **Version bumped to v1.15** for this batch (the two features
+  had shipped under the older v1.14.1 badge); `tests/version-consistency.sh` enforces
+  that all four version sites agree.
 - **2026-09-11 — in-app media viewer (issue #23, Phase 1) — SHIPPED:**
   clicking a tile now opens the file in a `#viewer-modal` instead of a Commons tab:
   media stage (image/video/audio/STL poster) + a details rail (description, artist,
