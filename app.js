@@ -55,6 +55,7 @@ const state = {
   lastRoulettePicks: [],         // recent roulette landings (anti-repeat; NOT reset per category)
   list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
   path: [],                      // breadcrumb trail, current category last (URL param path=)
+  viewerTitle: "",               // file open in the in-app viewer (URL param file=)
   items: [],                     // placed cards in fetch order (reflow source)
   colCount: 0,                   // live column count
   colHeights: [],                // tracked column heights for shortest-col place
@@ -292,6 +293,7 @@ function writeURL(mode) {
     params.set("tree", "1");
     params.set("depth", String(state.treeDepth));
   }
+  if (state.viewerTitle) params.set("file", state.viewerTitle);
   // path= is appended raw — encodePath already encodes each segment, and
   // URLSearchParams would double-encode the % escapes (the %2520 ugliness).
   let qs = "?" + params.toString();
@@ -300,6 +302,9 @@ function writeURL(mode) {
   // descent path — see popstate in init).
   if (mode === "push") history.pushState(null, "", qs);
   else history.replaceState(null, "", qs);
+  // Remember the feed's own identity (sans file=) so popstate can tell a
+  // viewer-only history move from a real navigation and skip a feed refetch.
+  lastFeedQS = feedQSFromQS(qs);
 }
 
 function updateURL() {
@@ -1300,6 +1305,7 @@ function buildCard(page) {
   }
 
   const card = document.createElement("div");
+  card.dataset.file = page.title; // viewer prev/next walks the rendered feed order
   card.className =
     "group relative bg-zinc-900 border border-zinc-800 rounded-2xl overflow-hidden hover:border-zinc-500 transition-all shadow-xl mb-6";
   card.innerHTML = `
@@ -1321,7 +1327,7 @@ function buildCard(page) {
       </div>
     </div>
     <div class="card-info-wrapper p-5 flex flex-col gap-y-2">
-      <a href="https://commons.wikimedia.org/wiki/${quotePath(page.title)}" target="_blank" class="no-underline flex flex-col gap-y-2 pointer-events-auto">
+      <a href="https://commons.wikimedia.org/wiki/${quotePath(page.title)}" target="_blank" class="card-info-link no-underline flex flex-col gap-y-2 pointer-events-auto">
         <h3 class="text-[9px] font-black text-blue-500 uppercase tracking-widest truncate" title="${esc(cleanTitle)}">${esc(cleanTitle)}</h3>
         <p class="text-[11px] text-zinc-400 leading-relaxed font-medium line-clamp-3">${esc(description)}</p>
       </a>
@@ -1932,6 +1938,11 @@ function resetAndFetch() {
   state.lastDeepPicks = new Set();
   state.abort.abort();
   state.abort = new AbortController();
+  // A category/list change invalidates the feed the viewer is stepping through,
+  // so close it — unless the URL still names the file (deep link / Back).
+  if (state.viewerTitle && !new URLSearchParams(location.search).get("file")) {
+    closeViewer({ fromHistory: true });
+  }
   prefetchPromise = null; // drop any in-flight prefetch for the old category
   lastBatchOk = false;
   typePreflighted = false; // fresh category/filter: redo the zero-match preflight
@@ -2185,6 +2196,290 @@ function onHeaderTapZone(e) {
   }
 }
 
+/* ---------------- in-app media viewer (issue #23, Phase 1 prototype) -------------
+ * Clicking a tile shows the file here instead of opening a Commons tab, so the
+ * app never loses the user — the prerequisite for kiosk mode.
+ *
+ * Tiles stay REAL ANCHORS. Only an unmodified left-click is intercepted, so
+ * Ctrl/Cmd-click, middle-click, right-click → Copy link address and "open in
+ * new tab" all keep working natively. "View Source ↗" is deliberately not
+ * intercepted — it remains the explicit new-tab escape hatch.
+ *
+ * Metadata comes from its own single-title call with a targeted extmetadata
+ * filter: the three feed call sites stay trimmed to two fields, because that
+ * trim is a deliberate ~3× payload win (307 B vs 3,290 B per file, measured).
+ */
+const VIEWER_TTL = 604800;        // 7d — file metadata is stable data
+const VIEWER_THUMB_W = 1600;      // stage-grade thumb; the bucket ladder quantizes it
+const VIEWER_META_KEYS =
+  "Artist|Credit|LicenseShortName|LicenseUrl|UsageTerms|DateTimeOriginal|Categories|" +
+  "AttributionRequired|Restrictions|ObjectName|ImageDescription";
+const viewerMeta = new Map();     // title -> {page, info} | null (session memo over the disk cache)
+let viewerFocusReturn = null;     // element to refocus when the viewer closes
+let viewerPushedEntry = false;    // did this open push a history entry?
+let lastFeedQS = null;            // feed identity without file= (popstate guard)
+
+// The feed's identity, ignoring viewer-only params — lets popstate distinguish
+// "opened/closed the viewer" from a real navigation.
+function feedQSFromQS(qs) {
+  const p = new URLSearchParams(String(qs || "").replace(/^\?/, ""));
+  p.delete("file");
+  return p.toString();
+}
+
+function fmtBytes(n) {
+  if (!n) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = Number(n), i = 0;
+  while (v >= 1024 && i < units.length - 1) { v /= 1024; i++; }
+  return `${v >= 10 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}
+
+function titleFromCommonsHref(href) {
+  // quotePath percent-encodes the colon (…/wiki/File%3A…), so decode the path
+  // segment before checking the namespace rather than matching "File:" raw.
+  const seg = /\/wiki\/(.+)$/.exec(href || "");
+  if (!seg) return "";
+  let t = seg[1];
+  try { t = decodeURIComponent(t); } catch { /* keep raw */ }
+  return t.startsWith("File:") ? t : "";
+}
+
+async function fetchViewerMeta(title) {
+  if (viewerMeta.has(title)) return viewerMeta.get(title);
+  const data = await api({
+    action: "query",
+    titles: title,
+    prop: "imageinfo|videoinfo|categories",
+    clprop: "hidden",
+    cllimit: "max",
+    iiprop: "url|size|extmetadata|derivatives|mediatype|mime",
+    iiextmetadatafilter: VIEWER_META_KEYS,
+    viprop: "url|size|derivatives|extmetadata",
+    viextmetadatafilter: VIEWER_META_KEYS,
+    iiurlwidth: String(VIEWER_THUMB_W),
+  }, { ttl: VIEWER_TTL });
+  const page = (data.query && data.query.pages && data.query.pages[0]) || null;
+  const out = page && !page.missing
+    ? (() => {
+        const info = {};
+        if (page.imageinfo && page.imageinfo[0]) Object.assign(info, page.imageinfo[0]);
+        if (page.videoinfo && page.videoinfo[0]) Object.assign(info, page.videoinfo[0]);
+        return { page, info };
+      })()
+    : null;
+  viewerMeta.set(title, out);
+  return out;
+}
+
+function viewerMediaHtml(page, info) {
+  const em = info.extmetadata || {};
+  const fileUrl = cleanUrl(info.url || "");
+  const thumbUrl = cleanUrl(info.thumburl || info.url || "");
+  const mime = (info.mime || "").toLowerCase();
+  const mediatype = (info.mediatype || "").toUpperCase();
+  const isVideo = mediatype === "VIDEO" || mime.startsWith("video/");
+  const isAudio = mediatype === "AUDIO" || mime.startsWith("audio/");
+  const is3D = mediatype === "3D" || mime === "application/sla";
+
+  if (is3D) {
+    // Poster until asked: the STL rig reuses the feed's activateStl (bytes are
+    // 40–104 MB on Category:STL files, so loading stays an explicit gesture).
+    return `<div class="relative w-full h-full media-container" data-stl="${esc(fileUrl)}">
+        <img src="${esc(thumbUrl)}" class="thumb-img w-full h-full object-contain" alt="">
+        <div class="stl-loading absolute inset-0 z-20 items-center justify-center bg-zinc-900/80"><span class="text-[10px] font-mono text-blue-400 animate-pulse">loading model…</span></div>
+        <button class="js-viewer-stl absolute bottom-3 left-1/2 -translate-x-1/2 z-30 text-[9px] font-black uppercase tracking-widest bg-purple-700 hover:bg-purple-600 text-white px-3 py-2 rounded-lg">Load 3D model</button>
+      </div>`;
+  }
+  if (isVideo) {
+    return `<video class="max-h-full max-w-full" controls playsinline preload="metadata" poster="${esc(thumbUrl)}" src="${esc(pickBestVideo(fileUrl, info.derivatives))}"></video>`;
+  }
+  if (isAudio) {
+    return `<div class="w-full max-w-md flex flex-col items-center gap-4">
+        <img src="${esc(thumbUrl)}" class="max-h-[40vh] rounded-xl object-contain" alt="">
+        <audio class="w-full" controls preload="metadata" src="${esc(fileUrl)}"></audio>
+      </div>`;
+  }
+  const alt = cleanHtml((em.ImageDescription && em.ImageDescription.value) || "") || page.title;
+  return `<img src="${esc(thumbUrl)}" class="max-h-full max-w-full object-contain" alt="${esc(alt)}">`;
+}
+
+function viewerDetailsHtml(page, info) {
+  const em = info.extmetadata || {};
+  const val = (k) => cleanHtml((em[k] && em[k].value) || "");
+  const cleanTitle = page.title.replace("File:", "");
+  const artist = val("Artist");
+  const licName = val("LicenseShortName");
+  const licUrl = (em.LicenseUrl && em.LicenseUrl.value) || "";
+  const descr = val("ImageDescription");
+  const dims = info.width && info.height ? `${info.width} × ${info.height} px` : "";
+  const fileLine = [info.mime, dims, fmtBytes(info.size)].filter(Boolean).join(" · ");
+
+  const rows = [];
+  const row = (label, value) => {
+    if (value) rows.push(`<div class="viewer-row"><span class="viewer-label">${label}</span><div class="viewer-value">${value}</div></div>`);
+  };
+  row("Description", descr || `<em class="text-zinc-600">No description on Commons</em>`);
+  row("Artist", artist);
+  row("Credit", val("Credit"));
+  row("Date", val("DateTimeOriginal"));
+  row("License", licName
+    ? (licUrl ? `<a href="${esc(licUrl)}" target="_blank" rel="noopener">${esc(licName)}</a>` : esc(licName))
+    : `<em class="text-zinc-600">No license recorded</em>`);
+  row("Usage terms", val("UsageTerms"));
+  row("Restrictions", val("Restrictions"));
+  row("Attribution required", val("AttributionRequired"));
+  row("File", fileLine);
+
+  const cats = page.categories || [];
+  if (cats.length) {
+    const pills = cats.map((c) => {
+      const name = c.title.replace("Category:", "").replaceAll("_", " ");
+      const cls = "hidden" in c ? "border border-zinc-700 text-zinc-500" : "bg-blue-700 text-white";
+      return `<button class="cat-pill px-2 py-1 rounded-full text-[8px] font-bold transition-colors hover:bg-blue-500 hover:text-white ${cls}" data-cat="${esc(c.title)}">${esc(name)}</button>`;
+    }).join("");
+    row(`Categories (${cats.length})`, `<div class="flex flex-wrap gap-1.5 mt-1">${pills}</div>`);
+  }
+
+  // Attribution line — needed for reuse compliance and any public/kiosk display.
+  const parts = [`"${cleanTitle}"`];
+  if (artist) parts.push(artist);
+  if (licName) parts.push(licName);
+  const attrib = `<div class="viewer-attrib"><strong class="text-zinc-300">Credit:</strong> ${esc(parts.join(" · "))} · <a href="https://commons.wikimedia.org/wiki/${quotePath(page.title)}" target="_blank" rel="noopener">Wikimedia Commons</a></div>`;
+  return rows.join("") + attrib;
+}
+
+function renderViewer(page, info) {
+  const title = page.title;
+  $("viewer-title").textContent = title.replace("File:", "").replaceAll("_", " ");
+  $("viewer-media").innerHTML = viewerMediaHtml(page, info);
+  $("viewer-details").innerHTML = viewerDetailsHtml(page, info);
+  const commonsUrl = info.descriptionurl || `https://commons.wikimedia.org/wiki/${quotePath(title)}`;
+  $("viewer-commons").href = commonsUrl;
+  $("viewer-original").href = cleanUrl(info.url || "") || commonsUrl;
+
+  const stlBtn = $("viewer-media").querySelector(".js-viewer-stl");
+  if (stlBtn) {
+    stlBtn.addEventListener("click", () => {
+      const box = $("viewer-media").querySelector("[data-stl]");
+      const url = box && box.getAttribute("data-stl");
+      stlBtn.remove();
+      if (url) activateStl($("viewer-media"), box, url).catch(() => {});
+    });
+  }
+  syncViewerNav();
+}
+
+async function openViewer(title, { push = true } = {}) {
+  if (!title) return;
+  state.viewerTitle = title;
+  if (push) viewerPushedEntry = true;
+  writeURL(push ? "push" : "replace");
+
+  const modal = $("viewer-modal");
+  if (modal.classList.contains("hidden")) {
+    viewerFocusReturn = document.activeElement;
+    modal.classList.remove("hidden");
+  }
+  $("viewer-title").textContent = title.replace("File:", "").replaceAll("_", " ");
+  $("viewer-media").innerHTML = "";
+  $("viewer-details").innerHTML = "";
+  $("viewer-loading").classList.remove("hidden");
+  syncViewerNav();
+
+  try {
+    const data = await fetchViewerMeta(title);
+    if (state.viewerTitle !== title) return;   // user stepped on before this landed
+    if (!data) throw new Error("file not found");
+    renderViewer(data.page, data.info);
+  } catch (e) {
+    console.error("viewer fetch failed:", e);
+    if (state.viewerTitle === title) {
+      $("viewer-details").innerHTML = `<div class="viewer-row"><span class="viewer-label">Error</span><div class="viewer-value text-red-400">Couldn't load this file's details.</div></div>`;
+    }
+  } finally {
+    if (state.viewerTitle === title) $("viewer-loading").classList.add("hidden");
+  }
+  if (state.viewerTitle === title && window.matchMedia("(pointer: fine)").matches) $("viewer-close").focus();
+}
+
+function closeViewer({ fromHistory = false } = {}) {
+  const modal = $("viewer-modal");
+  if (modal.classList.contains("hidden")) return;
+  modal.querySelectorAll("video, audio").forEach((m) => { try { m.pause(); } catch { /* ignore */ } });
+  if (stlRegistry.has($("viewer-media"))) deactivateStl($("viewer-media"));
+  modal.classList.add("hidden");
+  $("viewer-media").innerHTML = "";
+  $("viewer-details").innerHTML = "";
+  state.viewerTitle = "";
+  if (viewerFocusReturn && viewerFocusReturn.isConnected) viewerFocusReturn.focus();
+  if (fromHistory) return;                     // URL already reflects the closed state
+  if (viewerPushedEntry) { viewerPushedEntry = false; history.back(); }
+  else writeURL("replace");
+}
+
+function viewerTitles() {
+  return state.items.map((c) => c.dataset.file).filter(Boolean);
+}
+
+function syncViewerNav() {
+  const titles = viewerTitles();
+  const i = titles.indexOf(state.viewerTitle);
+  $("viewer-prev").disabled = i <= 0;
+  $("viewer-next").disabled = i < 0 || i >= titles.length - 1;
+}
+
+function viewerStep(delta) {
+  const titles = viewerTitles();
+  const i = titles.indexOf(state.viewerTitle);
+  const next = i < 0 ? null : titles[i + delta];
+  if (next) openViewer(next, { push: false });   // replace: stepping must not flood history
+}
+
+// URL -> viewer (Back closes, Forward reopens, deep links boot open).
+function syncViewerFromURL() {
+  const f = new URLSearchParams(location.search).get("file");
+  if (f && f !== state.viewerTitle) openViewer(f, { push: false });
+  else if (!f && state.viewerTitle) closeViewer({ fromHistory: true });
+}
+
+function installViewerInterception() {
+  document.addEventListener("click", (e) => {
+    if (e.defaultPrevented || e.button !== 0) return;
+    if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;   // native new-tab override
+    if (!e.target.closest) return;
+    if (e.target.closest(".stl-canvas")) return;                    // spinning a model isn't navigation
+    const a = e.target.closest("a.media-link, a.card-info-link");
+    if (!a) return;
+    // Prefer the card's own title (authoritative, unencoded); fall back to the href.
+    const card = a.closest("[data-file]");
+    const title = (card && card.dataset.file) || titleFromCommonsHref(a.getAttribute("href"));
+    if (!title) return;
+    e.preventDefault();
+    openViewer(title);
+  }, true);
+
+  $("viewer-close").addEventListener("click", () => closeViewer());
+  $("viewer-prev").addEventListener("click", () => viewerStep(-1));
+  $("viewer-next").addEventListener("click", () => viewerStep(1));
+  $("viewer-modal").addEventListener("click", (e) => {
+    if (e.target === $("viewer-modal")) closeViewer();             // backdrop click
+  });
+  $("viewer-details").addEventListener("click", (e) => {
+    const pill = e.target.closest("button[data-cat]");
+    if (!pill) return;
+    const cat = pill.getAttribute("data-cat");
+    closeViewer();
+    navigateTo(cat, { fresh: true });
+  });
+  document.addEventListener("keydown", (e) => {
+    if ($("viewer-modal").classList.contains("hidden")) return;
+    if (e.key === "Escape") { e.preventDefault(); closeViewer(); }
+    else if (e.key === "ArrowRight") { e.preventDefault(); viewerStep(1); }
+    else if (e.key === "ArrowLeft") { e.preventDefault(); viewerStep(-1); }
+  });
+}
+
 /* ---------------- boot ---------------- */
 
 async function init() {
@@ -2310,6 +2605,12 @@ async function init() {
   // the URL and refetch (no push — history already moved).
   window.addEventListener("popstate", async () => {
     const p2 = new URLSearchParams(location.search);
+    // The viewer is URL-driven, so sync it first. If only file= changed (open,
+    // close, Back/Forward on the viewer), stop here — the feed is unchanged and
+    // refetching it would flash the grid for no reason.
+    const feedUnchanged = feedQSFromQS(location.search) === lastFeedQS;
+    syncViewerFromURL();
+    if (feedUnchanged) return;
     const cat = p2.get("cat");
     const pileId = p2.get("pile");
     const psid = p2.get("psid");
@@ -2373,7 +2674,10 @@ async function init() {
     $("tree-modal").classList.add("hidden");
     rebuildDropdown();
     resetAndFetch();
+    lastFeedQS = feedQSFromQS(location.search);
   });
+
+  installViewerInterception();
 
   const observer = new IntersectionObserver(
     (entries) => {
@@ -2398,6 +2702,11 @@ async function init() {
   // Shared links can boot with the tree modal open at a given depth (?tree=1&depth=N).
   // After resetAndFetch so the tree render isn't killed by the requestId bump.
   if (params.get("tree") === "1") openTreeModal();
+
+  // Shared links can also boot with a file open in the viewer (?file=File:…).
+  // After resetAndFetch so state.items exists for prev/next.
+  if (params.get("file")) openViewer(params.get("file"), { push: false });
+  lastFeedQS = feedQSFromQS(location.search);
 }
 
 init();

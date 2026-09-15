@@ -119,6 +119,137 @@
     display: none;
 }
 
+/* ---------------- In-app media viewer (issue #23, Phase 1 prototype) ----------------
+ * Two-pane on desktop (stage + details rail); stacked on narrow screens, where
+ * the rail becomes a scrollable sheet under the stage. */
+.viewer-panel {
+    max-height: 96vh;
+}
+
+.viewer-stage {
+    min-height: 45vh;
+    overflow: hidden;
+}
+
+@media (min-width: 768px) {
+    .viewer-stage {
+        min-height: 70vh;
+    }
+}
+
+.viewer-rail {
+    max-height: 45vh;
+    background: rgb(24 24 27);
+}
+
+@media (min-width: 768px) {
+    .viewer-rail {
+        max-height: 96vh;
+    }
+}
+
+/* Media inside the stage never overflows the pane */
+#viewer-media img,
+#viewer-media video,
+#viewer-media canvas {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+}
+
+/* Prev/next edge affordances — large hit targets, hidden on touch (swipe/mobile) */
+.viewer-nav {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 20;
+    width: 44px;
+    height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 26px;
+    line-height: 1;
+    color: rgb(161 161 170);
+    background: rgba(9, 9, 11, 0.6);
+    border: 1px solid rgba(63, 63, 70, 0.6);
+    border-radius: 9999px;
+    backdrop-filter: blur(8px);
+    transition: all 0.2s ease;
+    cursor: pointer;
+}
+
+.viewer-nav:hover {
+    color: white;
+    background: rgba(37, 99, 235, 0.85);
+    border-color: rgba(96, 165, 250, 0.7);
+}
+
+.viewer-nav:disabled {
+    opacity: 0.25;
+    cursor: default;
+}
+
+.viewer-nav-prev { left: 10px; }
+.viewer-nav-next { right: 10px; }
+
+@media (pointer: coarse) {
+    .viewer-nav { display: none; }
+}
+
+.viewer-loading {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 10;
+}
+
+/* Details rail rows */
+.viewer-row {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(39, 39, 42, 0.7);
+}
+
+.viewer-row:last-child {
+    border-bottom: none;
+    padding-bottom: 0;
+}
+
+.viewer-label {
+    font-size: 9px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    color: rgb(113 113 122);
+}
+
+.viewer-value {
+    font-size: 11px;
+    line-height: 1.6;
+    color: rgb(212 212 216);
+    overflow-wrap: anywhere;
+}
+
+.viewer-value a {
+    color: rgb(96 165 250);
+}
+
+.viewer-attrib {
+    font-size: 10px;
+    line-height: 1.6;
+    color: rgb(161 161 170);
+    background: rgba(24, 24, 27, 0.9);
+    border: 1px solid rgba(63, 63, 70, 0.5);
+    border-radius: 10px;
+    padding: 10px;
+}
+
 /* Video/Audio Specifics */
 .media-placeholder {
     background-color: #18181b;
