@@ -24,6 +24,23 @@ Live at **https://commons-vibe.toolforge.org/**.
   ~1.9 KB) because the feed's 2-key trim is a deliberate ~3× win; the batch call
   sites are untouched. Regression: `tests/viewer.spec.js` (36 assertions, green).
   Not yet done: SDC/depicts, EXIF, globalusage, kiosk mode, PDF/DjVu, swipe.
+- **2026-09-11 — CATEGORY TYPE-AHEAD COMBOBOX PROTOTYPE — this branch
+  (`feature/category-autocomplete`), NOT deployed:** the `Jump to Category` input no
+  longer demands an exact, correctly-cased title. Two tiers fire in parallel and merge
+  as they land — `list=prefixsearch` (~319 ms, 0.9 KB) then CirrusSearch
+  `list=search&srnamespace=14` (~1034 ms, 1.0 KB) — enriched with batched
+  `categoryinfo` counts (7 d cache, reuses `getCatInfo`). Debounced 250 ms, minlength
+  2, per-query cached, `role=combobox` + Arrow/Enter/Escape keys.
+  **The point is correctness, not convenience:** prefix-only search *hides*
+  `Category:Chop Suey` (the Hopper painting) when you type `chop suey`, so the old
+  input reproduced the v1.14.1 wrong-case trap at the entry point — a silent landing
+  on a different real category. Tier 2 surfaces both twins with counts that separate
+  them (dish 16 files vs painting 2 files), and selection inserts the API's **canonical
+  title**, never the typed string. Container categories (0 files, N subcats) are
+  flagged `— try Deep` instead of leading to an empty feed. Regression:
+  `tests/category-search.spec.js` (28 assertions, green). Not done: template-based
+  redirect categories (see the note in the code map), "did you mean" in the bulk
+  editor, kiosk suppression.
 - **2026-09-11 — public-dir exposure closed, version guard, branch cleanup (chore):**
   `.htaccess` was never in effect on the live host (Toolforge's lighttpd ignores it),
   so `HANDOFF.md`, `README.md`, `PRD.md`, `DEPLOY.md`, `GEMINI.md` and
@@ -128,7 +145,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
 
 ## URL contract & persistence (do not break)
 
@@ -436,6 +453,31 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   skipped). `fetchImages` guard relaxed: list mode has no current category.
   Exiting: click any category pill (navigateTo clears state.list), or navigate
   via search/dropdown.
+
+### Category type-ahead (prototype)
+
+- `installCategoryAutocomplete()` — wires `#search-input` as an ARIA combobox
+  (`role=combobox`, `aria-expanded`, `aria-activedescendant`) with a 250 ms debounce
+  and `CAT_SUGGEST_MIN=2`. It owns `input`/`mousedown`/outside-click only; the
+  keyboard cases live in `handleSearch()` so ordering against the Enter-to-navigate
+  path stays deterministic (one keydown listener, not two).
+- `catPrefixSearch()` (`list=prefixsearch`) / `catFuzzySearch()` (`list=search`,
+  `srnamespace=14`) / `runCatSuggestions()` — the two tiers run under
+  `Promise.allSettled` and each repaints as it lands, then `getCatInfo()` supplies
+  file/subcat counts and it repaints once more. Per-query results are memoised in
+  `catSuggestCache`; a module-level `catSuggestReqId` makes stale responses no-ops.
+- `navigateToCategory(title)` — **canonical-title insertion**; this is what stops the
+  user's spelling (and its casing) from ever becoming the category title.
+- `renderCatSuggestions()` — flags container categories (0 files, N subcats) as
+  `— try Deep`, and pluralises counts correctly.
+- Measured costs (live, single-shot): prefixsearch ~319 ms / 0.9 KB,
+  CirrusSearch ~1034 ms / 1.0 KB, a 20-row prefix page *with counts* ~1.9 KB. Keep
+  `CAT_SUGGEST_MAX` small — a 500-row `allcategories` page is 42–48 KB.
+- **Category redirects are NOT detectable via `redirects=1`:** Commons uses
+  `{{Category redirect}}` templates, and `list=allpages&apnamespace=14&apfilterredir=redirects`
+  returns **zero** rows (verified 2026-09-11), so a redirect-style category looks like
+  an existing-but-empty category. Detecting them needs an explicit `insource:` check —
+  unresolved, and this is the one silent dead end the combobox does not fix.
 
 ### In-app media viewer (issue #23, Phase 1 prototype)
 

@@ -1971,6 +1971,18 @@ function resetAndFetch() {
 /* ---------------- event handlers ---------------- */
 
 async function handleSearch(e) {
+  // Type-ahead keyboard handling lives here (not in a second keydown listener)
+  // so ordering against the Enter-to-navigate path below is deterministic.
+  if (catSuggestOpen()) {
+    if (e.key === "ArrowDown") { e.preventDefault(); moveCatActive(1); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); moveCatActive(-1); return; }
+    if (e.key === "Escape") { e.preventDefault(); hideCatSuggestions(); return; }
+    if (e.key === "Enter" && catActiveIndex >= 0) {
+      e.preventDefault();
+      selectCatSuggestion(catActiveIndex);
+      return;
+    }
+  }
   if (e.key !== "Enter") return;
   const input = e.target;
   let val = input.value.trim();
@@ -2480,6 +2492,198 @@ function installViewerInterception() {
   });
 }
 
+/* ---------------- category type-ahead (prototype, issue TBD) ----------------
+ * The category input used to demand an exact, correctly-cased title or it failed:
+ * a typo got an alert, a wrong case silently landed on a DIFFERENT real category
+ * (the v1.14.1 Chop Suey/Suey trap at the input stage), and a container or
+ * template-redirect category gave an empty feed with no explanation.
+ *
+ * Two tiers, fired in parallel and merged as they land (measured on live Commons):
+ *   tier 1  list=prefixsearch  ~319 ms, 0.9 KB  — exact start-of-title matches
+ *   tier 2  list=search (ns14) ~1034 ms, 1.0 KB — fuzzy/case/plural/word-order
+ * Tier 2 is what actually helps: prefix-only returns nothing for "hopper painting"
+ * and hides Category:Chop Suey entirely for "chop suey", while fuzzy returns the
+ * Hopper categories and BOTH case twins side by side.
+ *
+ * Suggestions are enriched with batched categoryinfo counts (reusing getCatInfo,
+ * 7d cache) so a user can tell twins apart by size (painting 2 files vs dish 16)
+ * and spot container categories (0 files, N subcats → suggest Deep mode).
+ * Selection always inserts the API's CANONICAL title, never the typed string.
+ */
+const CAT_SUGGEST_MIN = 2;      // don't query for a single character
+const CAT_SUGGEST_MAX = 8;      // small: 20 rows with counts is ~1.9 KB, 500 is 42-48 KB
+const CAT_DEBOUNCE_MS = 250;    // fuse keystrokes into one settled query
+const CAT_SRC_TTL = 3600e3;     // 1h — prefixes/fuzzy rankings are stable enough
+
+let catSuggestTimer = null;
+let catSuggestReqId = 0;
+let catActiveIndex = -1;
+let catLastQuery = "";
+const catSuggestCache = new Map(); // "prefix|q" / "fuzzy|q" -> titles[]
+
+function catSuggestOpen() {
+  return !$("search-suggest").classList.contains("hidden");
+}
+
+function hideCatSuggestions() {
+  const box = $("search-suggest");
+  box.classList.add("hidden");
+  box.innerHTML = "";
+  catActiveIndex = -1;
+  $("search-input").setAttribute("aria-expanded", "false");
+}
+
+// Tier 1 — cheap title-prefix matches (namespace 14).
+async function catPrefixSearch(q) {
+  const key = "prefix|" + q;
+  if (catSuggestCache.has(key)) return catSuggestCache.get(key);
+  const data = await api(
+    { action: "query", list: "prefixsearch", pssearch: q, pslimit: "10", psnamespace: "14" },
+    { ttl: CAT_SRC_TTL },
+  );
+  const titles = ((data.query && data.query.prefixsearch) || []).map((p) => p.title);
+  catSuggestCache.set(key, titles);
+  return titles;
+}
+
+// Tier 2 — fuzzy intent matching (CirrusSearch). Case-insensitive, tolerant of
+// plurals, word order and accents; the tier that surfaces case twins.
+async function catFuzzySearch(q) {
+  const key = "fuzzy|" + q;
+  if (catSuggestCache.has(key)) return catSuggestCache.get(key);
+  const data = await api(
+    { action: "query", list: "search", srsearch: q, srnamespace: "14", srlimit: "10" },
+    { ttl: CAT_SRC_TTL },
+  );
+  const titles = ((data.query && data.query.search) || []).map((h) => h.title);
+  catSuggestCache.set(key, titles);
+  return titles;
+}
+
+function renderCatSuggestions(list) {
+  const box = $("search-suggest");
+  if (!list.length) {
+    hideCatSuggestions();
+    return;
+  }
+  box.innerHTML = list.map((item, i) => {
+    const name = item.title.replace(/^Category:/, "");
+    let meta = "";
+    if (item.files != null) {
+      meta = item.files === 0
+        ? `${item.subcats || 0} subcat${item.subcats === 1 ? "" : "s"} · no files${item.subcats ? " — try Deep" : ""}`
+        : `${item.files.toLocaleString()} file${item.files === 1 ? "" : "s"}` +
+          (item.subcats ? ` · ${item.subcats} subcat${item.subcats === 1 ? "" : "s"}` : "");
+    }
+    const flag = item.files === 0 && item.subcats ? " cat-suggest-container" : "";
+    return `<li role="option" id="cat-opt-${i}" data-title="${esc(item.title)}"` +
+      ` class="cat-suggest-row${flag}" aria-selected="false">` +
+      `<span class="cat-suggest-name">${esc(name)}</span>` +
+      `<span class="cat-suggest-meta">${esc(meta)}</span></li>`;
+  }).join("");
+  box.classList.remove("hidden");
+  catActiveIndex = -1;
+  $("search-input").setAttribute("aria-expanded", "true");
+}
+
+// Progressive: each tier paints as soon as it lands, then counts arrive and
+// repaint (getCatInfo is disk-cached for 7d, so the repaint is usually instant).
+async function runCatSuggestions(q) {
+  const reqId = ++catSuggestReqId;
+  catLastQuery = q;
+  const seen = new Map();
+  const snapshot = () => [...seen.values()].slice(0, CAT_SUGGEST_MAX);
+  const add = (titles, via) => {
+    const before = seen.size;
+    for (const title of titles) {
+      if (!seen.has(title)) seen.set(title, { title, via, files: null, subcats: null });
+    }
+    if (seen.size !== before && reqId === catSuggestReqId) renderCatSuggestions(snapshot());
+  };
+
+  await Promise.allSettled([
+    catPrefixSearch(q).then((t) => add(t, "prefix")),
+    catFuzzySearch(q).then((t) => add(t, "fuzzy")),
+  ]);
+  if (reqId !== catSuggestReqId) return;   // stale: a newer query owns the box
+
+  const list = snapshot();
+  if (!list.length) {
+    renderCatSuggestions([]);
+    return;
+  }
+  try {
+    const info = await getCatInfo(list.map((x) => x.title));
+    for (const item of list) {
+      const v = info.get(item.title) || info.get(normCat(item.title));
+      if (v) { item.files = v.files; item.subcats = v.subcats; }
+    }
+  } catch { /* counts are a nicety — names still work */ }
+  if (reqId === catSuggestReqId) renderCatSuggestions(snapshot());
+}
+
+// Canonical-title insertion: this is what structurally kills the wrong-case bug
+// class — the user's spelling is never used as the category title.
+function navigateToCategory(title) {
+  const input = $("search-input");
+  input.value = "";
+  hideCatSuggestions();
+  navigateTo(title, { fresh: true });
+}
+
+function moveCatActive(delta) {
+  const rows = [...document.querySelectorAll("#search-suggest .cat-suggest-row")];
+  if (!rows.length) return;
+  const n = rows.length;
+  // -1 means "nothing picked" (so Enter keeps its exact-match behaviour).
+  // First arrow press selects the first/last row, then it wraps within 0..n-1.
+  if (catActiveIndex < 0) catActiveIndex = delta > 0 ? 0 : n - 1;
+  else catActiveIndex = (catActiveIndex + delta + n) % n;
+  rows.forEach((r, i) => {
+    const on = i === catActiveIndex;
+    r.classList.toggle("cat-suggest-active", on);
+    r.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  const input = $("search-input");
+  if (catActiveIndex >= 0) input.setAttribute("aria-activedescendant", `cat-opt-${catActiveIndex}`);
+  else input.removeAttribute("aria-activedescendant");
+}
+
+function selectCatSuggestion(index) {
+  const rows = [...document.querySelectorAll("#search-suggest .cat-suggest-row")];
+  const row = rows[index];
+  if (row) navigateToCategory(row.getAttribute("data-title"));
+}
+
+function installCategoryAutocomplete() {
+  const input = $("search-input");
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-controls", "search-suggest");
+  input.setAttribute("aria-expanded", "false");
+
+  input.addEventListener("input", () => {
+    const q = input.value.trim();
+    clearTimeout(catSuggestTimer);
+    catSuggestReqId++;                     // any pending render is now stale
+    if (q.length < CAT_SUGGEST_MIN) { hideCatSuggestions(); return; }
+    catSuggestTimer = setTimeout(() => runCatSuggestions(q), CAT_DEBOUNCE_MS);
+  });
+
+  // mousedown (not click) so the pick wins the race against the input's blur.
+  $("search-suggest").addEventListener("mousedown", (e) => {
+    const row = e.target.closest("[data-title]");
+    if (!row) return;
+    e.preventDefault();
+    navigateToCategory(row.getAttribute("data-title"));
+  });
+
+  document.addEventListener("click", (e) => {
+    if (e.target === input || e.target.closest("#search-suggest")) return;
+    if (catSuggestOpen()) hideCatSuggestions();
+  });
+}
+
 /* ---------------- boot ---------------- */
 
 async function init() {
@@ -2545,6 +2749,7 @@ async function init() {
 
   rebuildDropdown();
   $("search-input").addEventListener("keydown", handleSearch);
+  installCategoryAutocomplete();
   $("refresh-btn").addEventListener("click", handleRefresh);
   $("edit-list-btn").addEventListener("click", handleEditList);
   $("modal-cancel").addEventListener("click", handleModalCancel);
