@@ -9,7 +9,44 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-01, v1.15 deployed; v1.16 in review)
+## Current state (updated 2026-10-01, v1.15 + v1.16 + v1.17 deployed)
+
+- **2026-10-01 — v1.17 deployed.** v1.16 (broken-thumb recovery) had already been
+  deployed from `main`; v1.17 (cross-engine hardening) is now also live — SHA256
+  verified local = server = live (`app.js` `ef1c8c7c…`, `index.html` `2a8fc56b…`),
+  live smoke test green (12/12 tiles, v1.17 badge, URL contract intact).
+- **2026-10-01 — cross-engine hardening (v1.17).** The suite had only ever
+  run on the default Playwright session, which is bundled Chromium. Running the same
+  specs on Firefox and WebKit surfaced four divergences; § Cross-engine notes has the
+  measured facts and the workarounds they justify.
+  * **The test gate could not fail — fixed first, since everything else depended on
+    it.** `playwright-cli run-code` ALWAYS exits 0, even when the spec throws, and
+    `run.sh` gated on that exit code while sending stdout to `/dev/null` — so every
+    spec printed `✔ all assertions pass` unconditionally, and a real regression would
+    have shipped green. Gating now classifies on the spec's OUTPUT (`### Error` /
+    `### Result` / `is not open`) in one shared place, `tests/spec-lib.sh`.
+    `thumb-recovery.spec.js` was the one spec that RETURNED its failure counts instead
+    of throwing, so it had no `### Error` line to detect; it now throws like the rest.
+  * **Header tap-zone restore — an app fix, not a spec fix.** The restore was bound to
+    `pointerdown` alone, and the `click` branch only swallowed a trailing click that
+    `pointerdown` had already armed. Firefox's programmatic mouse input delivers
+    `mousedown`+`click` with NO `pointerdown`, so the header stayed stuck collapsed.
+    The `click` branch now performs the restore itself when nothing armed it (existing
+    swallow semantics preserved). Latent for real users — genuine Firefox input always
+    fires `pointerdown` — but it was a real dependency on one input event.
+  * **Four spec-side corrections:** the `header-collapse` env probe required
+    `maxTouchPoints > 0` on top of the coarse-pointer query the app actually gates on
+    (Firefox/WebKit never set it); the `stl` scroll step assumed one wheel tick equals
+    one batch (Firefox scrolls ~575px per tick vs WebKit's ~1276px, so a tick could
+    trigger no request at all and the step waited 25s for it); the viewer's
+    "really opened a new tab" assertion dispatched a SYNTHETIC ctrl-click, which only
+    Chromium acts on — and on macOS ctrl+click is a secondary click in every engine,
+    so it now uses a real click with the platform's modifier (Cmd); and the
+    `header-collapse` outside-zone step sampled the collapsed state immediately, racing
+    the rAF frame that carries the (directional) scroll delta — the new gate caught
+    that as a one-off flake at scrollY 1200 before the state was waited for instead.
+  * **New tooling:** `tests/engine-matrix.sh` (every spec on all three engines) and
+    `tests/engine-quirks.spec.js` (the engine facts as executable assertions).
 
 - **2026-10-01 — broken-thumbnail recovery (v1.16, this PR).** Tiles that failed to
   load used to stay empty until a page reload — unacceptable in shuffle mode, where
@@ -193,7 +230,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -333,6 +370,71 @@ python3 -m http.server 8123        # any static server works; no build step
     instead of an empty feed, and no tile's `srcset` ever contains a non-/thumb/
     URL or a bucket wider than 1280px. Automated:
     `tests/thumb-recovery.spec.js` (19 assertions).
+25. Cross-engine + gate (v1.17). Verify `tests/run.sh` can actually FAIL: break one
+    assertion on purpose (or `run_spec /tmp/zz-fail.spec.js "x"` with a throwing
+    spec) and confirm it exits non-zero with the `FAIL` line printed. Then run
+    `tests/engine-matrix.sh` (needs the `:8123` server) — every spec is expected
+    green on Chromium, Firefox and WebKit. Automated: `tests/engine-matrix.sh`,
+    `tests/engine-quirks.spec.js` (6 assertions).
+
+## Cross-engine notes (Chromium / Firefox / WebKit)
+
+Measured 2026-10-01 with `playwright-cli` (`@playwright/cli` 0.1.13) on macOS.
+`tests/engine-quirks.spec.js` asserts these as executable facts. **A failure there
+means an engine or Playwright changed — NOT that the app regressed.** Re-measure,
+then simplify whatever workaround the stale fact was justifying.
+
+| Fact | Chromium | Firefox | WebKit |
+|---|---|---|---|
+| `mouse.click()` delivers `pointerdown` (desktop ctx) | yes | yes | yes |
+| …the same in a `hasTouch: true` context | yes | **NO** | yes |
+| `hasTouch: true` ⇒ `maxTouchPoints > 0` | yes | **NO** | **NO** |
+| Synthetic (untrusted) ctrl-click opens a tab | yes† | NO | yes† |
+| Real ctrl+click opens a tab (macOS) | NO | NO | NO |
+| Real **Cmd**+click opens a tab (macOS) | yes | yes | yes |
+| Scroll per `mouse.wheel(0, 4500)` | ~1276px | **~575px** | ~1276px |
+
+† Timing-sensitive AND engine-dependent — measured over three 1.5s trials, but an
+earlier WebKit sample with a 1.0s window saw no tab. Deliberately **not** asserted;
+`engine-quirks.spec.js` records it as an `INFO` line instead.
+
+Consequences, and where each is handled:
+
+* **`run-code` always exits 0**, even when the spec throws (verified: a body of
+  `async page => { throw new Error("x") }` exits 0). The only failure signal is the
+  `### Error` line on stdout — and a "browser is not open" reply carries no marker at
+  all, so it would otherwise score as a pass. All gating lives in `spec-lib.sh`.
+* **Firefox's mouse API emits no `pointerdown` — but ONLY in a `hasTouch: true`
+  context.** In a desktop context it delivers it normally. This is a Playwright/Firefox
+  artifact, not a Firefox defect: `page.touchscreen.tap()` in the same engine DOES emit
+  `pointerdown`, and so does real user input. The conditionality is what made it
+  slippery — it reproduced only in `header-collapse.spec.js`, whose touch-emulated
+  context is the app's actual mobile configuration. It still caught a genuine
+  fragility — a restore that depended on that single event — fixed in `app.js`.
+* **`maxTouchPoints` is 0 on Firefox/WebKit** even with `hasTouch: true`. The
+  `header-collapse` env probe asserts the coarse-pointer media query, which is what
+  `app.js` actually gates on (`COARSE_POINTER`), and reports `maxTouchPoints` for
+  diagnostics only.
+* **A wheel tick is not a batch.** Firefox scrolls less than half as far per tick for
+  the same `deltaY`, so `stl`'s one-tick-per-batch loop could wait 25s for a request
+  that was never made. It now ticks until a batch lands and asserts that batch's
+  latency — the real "stays responsive" contract.
+* **macOS: ctrl+click is a secondary click.** No engine opens a tab for a real
+  ctrl+click; Cmd does. The viewer spec derives the modifier instead of hardcoding
+  Control and uses a REAL click — a synthetic dispatch only ever passed on Chromium.
+* **Untrusted synthetic events are not portable.** The old viewer assertion claimed a
+  synthetic ctrl-click "really opened a tab" — measured Chromium yes and WebKit yes but
+  Firefox no over three 1.5s trials, while an earlier WebKit sample with a 1.0s window
+  saw none, making it timing-sensitive as well as engine-dependent. Never assert a
+  browser-level outcome (navigation, popup) off a `dispatchEvent`; assert the app's own
+  contract (`defaultPrevented`, internal state) instead, and prove real new-tab
+  passthrough with a REAL click. `engine-quirks.spec.js` records this one as an `INFO`
+  line rather than asserting it.
+* **`--browser=chromium` is rejected** by `playwright-cli open` — the default *is*
+  bundled Chromium, so open it with no flag.
+* **Long session names break the launch.** `playwright-cli` derives a UNIX socket path
+  from the session name; `iso-firefox-header-collapse` was long enough to die with
+  `listen EINVAL`. Matrix sessions are `mx1`, `mx2`, `mx3`.
 
 ## Deploy to Toolforge
 

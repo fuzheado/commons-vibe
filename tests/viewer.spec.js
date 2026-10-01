@@ -107,7 +107,24 @@ async page => {
   await step("Ctrl/Cmd-click is NOT intercepted (native new-tab override)", async () => {
     await page.keyboard.press("Escape"); // start from the feed
     await page.waitForTimeout(400);
-    const parentPages = page.context().pages().length;
+    // REAL platform-modifier click FIRST, while the feed is still unobstructed:
+    // the synthetic probe below opens the viewer modal, which would intercept a
+    // real click aimed at the tile (it timed out on actionability when this ran
+    // second). On macOS the new-tab modifier is Cmd (Meta), NOT Ctrl — Ctrl+click
+    // is a secondary click there, so a real Ctrl+click opens no tab in ANY of the
+    // three engines (measured 2026-10-01). The earlier version asserted this off a
+    // SYNTHETIC dispatch, which only Chromium treats as a real activation, so it
+    // passed on Chromium alone.
+    const newTabModifier = await page.evaluate(() =>
+      /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "Meta" : "Control");
+    const pagesBeforeReal = page.context().pages().length;
+    const popupP = page.waitForEvent("popup", { timeout: 5000 }).catch(() => null);
+    await page.click(".group a.media-link", { modifiers: [newTabModifier], timeout: 10000 }).catch(() => {});
+    await popupP;
+    await page.waitForTimeout(400);
+    const pagesAfterReal = page.context().pages().length;
+    t("modifier-click really opened a new tab (native passthrough)",
+      pagesAfterReal >= pagesBeforeReal + 1, `${pagesBeforeReal} → ${pagesAfterReal} via ${newTabModifier}`);
     // Synthetic dispatch: proves what OUR handler does (does it preventDefault?)
     // without depending on real popup delivery, which browsers may block.
     const probe = await page.evaluate(() => {
@@ -125,16 +142,19 @@ async page => {
     await page.waitForTimeout(900); // a late async open, or the popup, surfaces here
     t("ctrl-click was NOT preventDefault'ed (native new-tab wins)", probe.ctrlPrevented === false);
     t("ctrl-click did not open the viewer", probe.viewerAfterCtrl === false);
-    // Because we did NOT intercept it, the browser really did open a tab.
-    const pagesAfterCtrl = page.context().pages().length;
-    t("ctrl-click really opened a new tab (native passthrough)", pagesAfterCtrl >= parentPages + 1, `${parentPages} → ${pagesAfterCtrl}`);
-    // Drop the stray tab so later page-count baselines stay meaningful.
-    for (const p of page.context().pages()) {
-      if (p !== page) await p.close().catch(() => {});
-    }
     t("plain click IS intercepted (positive control)", probe.plainPrevented === true);
     s = await state();
     t("plain click opened the viewer", s.open === true);
+    // Drop stray tabs LAST, so later page-count baselines stay meaningful: this
+    // must run after BOTH tab-opening paths (the real modifier-click and, on
+    // Chromium, the synthetic dispatch). Retry, because closing a page that is
+    // still mid-navigation can reject, and a swallowed rejection leaves it open.
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const strays = page.context().pages().filter((p) => p !== page);
+      if (!strays.length) break;
+      for (const p of strays) await p.close().catch(() => {});
+      await page.waitForTimeout(300);
+    }
   });
 
   // ── 4. viewer content ───────────────────────────────────────────────────

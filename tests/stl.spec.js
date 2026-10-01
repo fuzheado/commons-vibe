@@ -161,12 +161,29 @@ async page => {
   await step("2. scroll stays responsive", async () => {
     let prev = await page.locator(".group").count();
     for (let i = 0; i < 3; i++) {
-      const t0 = Date.now();
-      await page.mouse.wheel(0, 4500);
-      await page.waitForFunction((p) => document.querySelectorAll(".group").length > p, prev, { timeout: 25000 });
-      prev = await page.locator(".group").count();
-      const dt = Date.now() - t0;
-      t(`scroll ${i + 1}: next batch < 3000ms`, dt < 3000, `${prev} tiles, ${dt}ms`);
+      // One wheel tick is NOT one batch: engines translate the same deltaY into
+      // different scroll distances (measured 2026-10-01: Firefox ~575px vs
+      // WebKit ~1276px per tick), so a single tick can stop short of the
+      // infinite-scroll sentinel and trigger no fetch at all — the old
+      // one-tick-per-batch loop then waited 25s for a request that was never
+      // made. Tick until a batch actually lands, and assert the latency of the
+      // batch that did, which is the real "stays responsive" contract.
+      let latency = null;
+      let ticks = 0;
+      for (let tick = 0; tick < 6 && latency === null; tick++) {
+        ticks++;
+        const tTick = Date.now();
+        await page.mouse.wheel(0, 4500);
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          if ((await page.locator(".group").count()) > prev) { latency = Date.now() - tTick; break; }
+          await page.waitForTimeout(120);
+        }
+      }
+      const now = await page.locator(".group").count();
+      t(`scroll ${i + 1}: next batch < 3000ms`, latency !== null && latency < 3000,
+        `${prev} -> ${now} tiles, ${latency === null ? "no batch" : latency + "ms"} after ${ticks} tick(s)`);
+      prev = now;
     }
     await parkMouse();
   });

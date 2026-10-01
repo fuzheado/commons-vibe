@@ -62,10 +62,14 @@ async page => {
     return (await scrollY()) > 100; // already over the threshold (clamped)
   };
   const coarseFlag = await pg.evaluate(() => ({
+    // The app's touch gate is exactly this media query (app.js: COARSE_POINTER).
+    // maxTouchPoints is reported for DIAGNOSTICS ONLY: Playwright's Firefox and
+    // WebKit leave it at 0 even with hasTouch:true, so requiring it made this
+    // harness self-check unsatisfiable on two of the three engines.
     coarse: matchMedia("(pointer: coarse)").matches,
     touch: navigator.maxTouchPoints > 0,
   }));
-  t("environment: touch-emulated (coarse pointer)", coarseFlag.coarse && coarseFlag.touch,
+  t("environment: touch-emulated (coarse pointer)", coarseFlag.coarse,
     JSON.stringify(coarseFlag));
 
   await pg.goto(BASE + "/?sort=alpha&view=det&cat=Category%3AFeatured%20pictures%20on%20Wikimedia%20Commons&size=l&_=" + Date.now());
@@ -153,6 +157,15 @@ async page => {
 
   await step("7. a tap outside the top zone does not expand", async () => {
     await scrollDownFar();
+    // Collapse is rAF-throttled AND directional — updateHeaderCollapse only
+    // collapses on a downward delta > HEADER_DIR_DELTA — so an immediate read can
+    // race the frame carrying that delta, especially when infinite scroll grows the
+    // document mid-step. Observed as a rare flake (2026-10-01, chromium, in
+    // tests/run.sh) that then vanished on 3/3 re-runs. Wait for the state instead of
+    // sampling it; a genuine "never collapses" still fails, on the timeout.
+    await pg.waitForFunction(
+      () => document.querySelector("#app-header").classList.contains("cv-header-collapsed"),
+      null, { timeout: 3000 }).catch(() => {});
     t("collapsed for outside-zone tap", await collapsed(), await scrollY().then((y) => `scrollY ${y}`));
     // x=10 is the page margin (main p-4) — no tile/header under it.
     await pg.mouse.click(10, 200);

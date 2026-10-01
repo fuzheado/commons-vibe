@@ -147,5 +147,12 @@ async page => {
     t("live: no original/oversize srcset candidate rendered", s.nonThumbCandidates === 0, `${s.nonThumbCandidates} bad candidate(s)`);
   });
 
-  return { passed: results.filter((r) => r.startsWith("PASS")).length, failed, results };
+  // Throw on failure like every other spec. This one used to RETURN the failure
+  // counts instead of throwing, so even with a correct gate there was no
+  // "### Error" line to detect and a broken run scored as a pass.
+  const passed = results.filter((r) => r.startsWith("PASS")).length;
+  const summary = `Thumb-recovery spec: ${passed} passed, ${failed} failed\n${results.join("\n")}`;
+  console.log(summary);
+  if (failed > 0) throw new Error(summary);
+  return { passed, failed, results };
 }
