@@ -18,6 +18,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Spin the 🎲 roulette** to hop into a random subcategory, and **filter by media type** (images / video / audio / 3D models) from the header.
 * **Spin 3D models in place** — STL tiles render an interactive WebGL viewer on hover: drag to spin (yaw/pitch), wheel to zoom, auto-rotating until you grab it. Posters stay until you hover, bytes load on intent, and files too big to spin (40MB+) keep their thumbnail.
 * **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed.
+* **Clip images into a personal collection** — hit the bookmark button on any tile (or "✂ Clip this" in the viewer); your collection lives in the browser and browses as its own feed via the header chip or `?clips=1`.
 
 ## **A running version can be found at: https://commons-vibe.toolforge.org/**
 
@@ -63,8 +64,8 @@ Both modes work in **Detailed** (filename + 3-line description) and **Minimal** 
 CommonsVibe is evolving from a browser into a personal curation tool. Planned features include:
 
 * **~~Category Tree Exploration~~ — shipped in v1.6:** tree modal (depth 1–5, lazy expand, file-count badges), parent/subcategory chip row, and Deep mode (`deepcategory` shuffle across the whole subtree, `?deep=1` in the URL). Still open from the original plan: multi-select union feeds, "category roulette", tree-aware `path=` URL state.
-* **List Mode — v1.11 shipped the first slice:** feed PagePiles (`?pile=`), saved PetScan queries (`?psid=`), or live PetScan queries (`?pet=&petdepth=`). Still open: hand-curated file-ID lists and "clip this image" affordances.
-* **Personal Collections:** The ability to "clip" or save images into your own custom sets.
+* **List Mode — v1.11 shipped the first slice:** feed PagePiles (`?pile=`), saved PetScan queries (`?psid=`), or live PetScan queries (`?pet=&petdepth=`). **v1.18 added "clip this image":** a personal collection stored in your browser (bookmark button on any tile or in the viewer; browse it via `?clips=1`). Still open: named collections and hand-curated shareable file-ID lists.
+* **~~Personal Collections~~ — first slice shipped in v1.18:** clip any tile or viewer file into a personal collection (localStorage, no account); browse it as a feed via the header chip or `?clips=1`. Still open: named collections, sync across devices.
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **~~Filtering~~ — shipped in v1.11:** media-type filter (images / video / audio) in the header, applied server-side in shuffle mode and client-side elsewhere. Still open: granular filters (e.g. exclude TIFF specifically).

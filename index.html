@@ -95,7 +95,7 @@
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span id="app-version">v1.17</span>
+                    <span id="app-version">v1.18</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>
@@ -127,6 +127,12 @@
                 </div>
 
                 <div class="flex gap-2">
+                    <button id="clips-btn" class="hidden items-center gap-1.5 p-1.5 px-2.5 bg-zinc-900/50 hover:bg-blue-600 rounded-full text-zinc-300 hover:text-white text-[9px] font-black uppercase tracking-widest border border-zinc-800 transition-all shadow-lg" title="Your clipped images">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                        </svg>
+                        <span id="clips-count">0</span>
+                    </button>
                     <button id="tree-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Browse Category Tree">
                         <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 7v4m0 0H6v6m6-6h6v6M9 3h6v4H9zM3 17h6v4H3zM15 17h6v4h-6z" />
@@ -235,6 +241,7 @@
                 </header>
                 <div id="viewer-details" class="flex-1 overflow-y-auto p-5 flex flex-col gap-4"></div>
                 <footer class="p-5 border-t border-zinc-800 flex flex-wrap gap-2">
+                    <button id="viewer-clip-btn" class="inline-block text-[9px] font-bold text-zinc-300 bg-zinc-800 hover:bg-blue-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest" title="Clip this file">✂ Clip this</button>
                     <a id="viewer-commons" href="#" target="_blank" rel="noopener" class="inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">Open on Commons ↗</a>
                     <a id="viewer-original" href="#" target="_blank" rel="noopener" class="inline-block text-[9px] font-bold text-zinc-300 bg-zinc-800 hover:bg-zinc-700 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">Original file</a>
                 </footer>

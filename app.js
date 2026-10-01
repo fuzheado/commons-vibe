@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.17 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.18 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -40,9 +40,10 @@
 const API_BASE = "https://commons.wikimedia.org/w/api.php";
 const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
+const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titles, newest first
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.17"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.18"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -61,7 +62,8 @@ const state = {
   type: "all",                   // media filter all|image|video|audio|3d (URL param type=)
   lastDeepPicks: new Set(),      // categories used by the previous deep batch
   lastRoulettePicks: [],         // recent roulette landings (anti-repeat; NOT reset per category)
-  list: null,                    // list mode: {source:'pile'|'psid'|'pet', id, depth?, titles, cursor}
+  list: null,                    // list mode: {source:'pile'|'psid'|'pet'|'clips', id, depth?, titles, cursor}
+  clips: [],                     // personal collection (localStorage vibe_clips) — File: titles, newest first
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   viewerTitle: "",               // file open in the in-app viewer (URL param file=)
   items: [],                     // placed cards in fetch order (reflow source)
@@ -294,8 +296,11 @@ function writeURL(mode) {
   params.set("size", state.size);
   params.set("type", state.type);
   if (state.list) {
-    params.set(state.list.source, state.list.id);
-    if (state.list.source === "pet") params.set("petdepth", String(state.list.depth));
+    if (state.list.source === "clips") params.set("clips", "1");
+    else {
+      params.set(state.list.source, state.list.id);
+      if (state.list.source === "pet") params.set("petdepth", String(state.list.depth));
+    }
   }
   if (state.treeOpen) {
     params.set("tree", "1");
@@ -325,7 +330,7 @@ function rebuildDropdown() {
   if (state.list) {
     const opt = document.createElement("option");
     const L = state.list;
-    opt.text = L.source === "pile" ? `PagePile ${L.id}` : L.source === "psid" ? `PetScan ${L.id}` : `PetScan: ${L.id}`;
+    opt.text = L.source === "pile" ? `PagePile ${L.id}` : L.source === "psid" ? `PetScan ${L.id}` : L.source === "clips" ? `My Clips (${L.titles.length})` : `PetScan: ${L.id}`;
     opt.selected = true;
     select.add(opt);
     return;
@@ -514,6 +519,11 @@ function listApiUrl(L) {
 
 async function loadList() {
   const L = state.list;
+  // Clips feed: titles come from the local collection — no external fetch.
+  if (L.source === "clips") {
+    L.titles = [...state.clips];
+    return;
+  }
   const url = listApiUrl(L);
   const cached = cacheGet(url, 3600e3); // snapshots: 1h
   if (cached) { L.titles = cached; return; }
@@ -567,6 +577,107 @@ function setList(source, id, depth) {
     state.list = null;
     window.alert(`Couldn't load that ${source === "pile" ? "PagePile" : "PetScan"} list: ${e.message}`);
   });
+}
+
+/* ---------------- clips / personal collection (v1.18) ---------------- */
+
+// One localStorage-backed collection (vibe_clips: File: titles, newest first).
+// The feed side reuses list mode (source 'clips') so batching, type filter,
+// size/view toggles and the URL round-trip all come for free.
+
+function loadClips() {
+  try {
+    const arr = JSON.parse(localStorage.getItem(CLIPS_KEY) || "[]");
+    state.clips = Array.isArray(arr) ? arr.filter((t) => typeof t === "string" && t) : [];
+  } catch {
+    state.clips = [];
+  }
+}
+
+const isClipped = (title) => state.clips.some((t) => normCat(t) === normCat(title));
+
+function syncClipChip() {
+  const chip = $("clips-btn");
+  if (!chip) return;
+  const n = state.clips.length;
+  $("clips-count").textContent = n > 99 ? "99+" : String(n);
+  // Hidden while empty (the fix-thumbs pattern) — clipping the first tile
+  // reveals it; emptying the clips feed hides it again (Back still works).
+  chip.classList.toggle("hidden", n === 0);
+  chip.title = n
+    ? `Your collection (${n}) — open the clips feed`
+    : "Clip tiles with the bookmark button to build your collection";
+}
+
+// Keep every rendered clip button for this file (tiles + viewer) in step.
+function updateClipButtons(title) {
+  const norm = normCat(title);
+  const on = isClipped(title);
+  for (const btn of document.querySelectorAll(".clip-btn[data-clip-file]")) {
+    if (normCat(btn.getAttribute("data-clip-file")) !== norm) continue;
+    btn.classList.toggle("bg-blue-600", on);
+    btn.classList.toggle("text-white", on);
+    btn.classList.toggle("bg-zinc-800", !on);
+    btn.classList.toggle("text-zinc-400", !on);
+    btn.title = on ? "Remove from your collection" : "Clip this image";
+  }
+  syncViewerClipBtn();
+}
+
+function syncViewerClipBtn() {
+  const vb = $("viewer-clip-btn");
+  if (!vb) return;
+  const on = !!(state.viewerTitle && isClipped(state.viewerTitle));
+  vb.classList.toggle("bg-blue-600", on);
+  vb.classList.toggle("text-white", on);
+  vb.classList.toggle("bg-zinc-800", !on);
+  vb.textContent = on ? "✂ Clipped ✓" : "✂ Clip this";
+  vb.title = on ? "Remove from your collection" : "Clip this file";
+}
+
+function toggleClip(title) {
+  const i = state.clips.findIndex((t) => normCat(t) === normCat(title));
+  const added = i === -1;
+  if (added) state.clips.unshift(title);
+  else state.clips.splice(i, 1);
+  try {
+    localStorage.setItem(CLIPS_KEY, JSON.stringify(state.clips));
+  } catch (e) {
+    console.warn("clip save failed:", e);
+  }
+  syncClipChip();
+  updateClipButtons(title);
+  // Unclipping inside the clips feed drops the tile in place — no reload,
+  // so the rest of the feed (and its scroll position) is untouched.
+  if (!added && state.list && state.list.source === "clips") removeClipCard(title);
+  return added;
+}
+
+function removeClipCard(title) {
+  const L = state.list;
+  if (!L || L.source !== "clips") return;
+  const norm = normCat(title);
+  L.titles = L.titles.filter((t) => normCat(t) !== norm);
+  const idx = state.items.findIndex((c) => normCat(c.dataset.file || "") === norm);
+  if (idx !== -1) {
+    state.items[idx].remove();
+    state.items.splice(idx, 1);
+    reflow();
+  }
+  syncClipChip();
+  if (!L.titles.length) {
+    $("end-message").classList.remove("hidden");
+    $("loading-spinner").classList.add("hidden");
+  }
+}
+
+function openClips() {
+  if (!state.clips.length) return;
+  if (state.list && state.list.source === "clips") return;
+  state.list = { source: "clips", id: "clips", cursor: 0, titles: [...state.clips] };
+  state.path = [];
+  rebuildDropdown(); // list mode boots via URL call this in init — chip entry needs its own
+  resetAndFetch();
 }
 
 /* ---------------- batch fetching (alpha + shuffle) ---------------- */
@@ -1571,11 +1682,18 @@ function buildCard(page) {
       </a>
       <div class="card-footer pt-3 border-t border-zinc-800/50 flex justify-between items-center pointer-events-auto">
         <a href="https://commons.wikimedia.org/wiki/${quotePath(page.title)}" target="_blank" class="view-source-btn inline-block text-[9px] font-bold text-white bg-zinc-800 hover:bg-purple-600 px-3 py-2 rounded-lg transition-colors uppercase tracking-widest">View Source ↗</a>
-        <button class="tag-btn p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="View Categories">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
-          </svg>
-        </button>
+        <div class="flex items-center gap-1.5">
+          <button class="clip-btn p-2 bg-zinc-800 rounded-lg text-zinc-400 hover:bg-blue-600 hover:text-white transition-all shadow-lg" data-clip-file="${esc(page.title)}" title="Clip this image">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+            </svg>
+          </button>
+          <button class="tag-btn p-2 bg-zinc-800 hover:bg-blue-600 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="View Categories">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+            </svg>
+          </button>
+        </div>
       </div>
     </div>`;
 
@@ -1672,6 +1790,23 @@ function buildCard(page) {
   };
   tagBtn.addEventListener("click", toggleDrawer);
   closeBtn.addEventListener("click", toggleDrawer);
+  // Clip toggle (personal collection, v1.18): reflect persisted state at build
+  // time (a revisit/reflow re-renders tiles), then toggle + persist on click.
+  const clipBtn = card.querySelector(".clip-btn");
+  const syncClipBtn = () => {
+    const on = isClipped(page.title);
+    clipBtn.classList.toggle("bg-blue-600", on);
+    clipBtn.classList.toggle("text-white", on);
+    clipBtn.classList.toggle("bg-zinc-800", !on);
+    clipBtn.classList.toggle("text-zinc-400", !on);
+    clipBtn.title = on ? "Remove from your collection" : "Clip this image";
+  };
+  syncClipBtn();
+  clipBtn.addEventListener("click", (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleClip(page.title);
+  });
   for (const pill of card.querySelectorAll(".cat-pill")) {
     pill.addEventListener("click", (e) => {
       e.preventDefault();
@@ -2630,6 +2765,7 @@ function renderViewer(page, info) {
       if (url) activateStl($("viewer-media"), box, url).catch(() => {});
     });
   }
+  syncViewerClipBtn();
   syncViewerNav();
 }
 
@@ -2980,8 +3116,10 @@ async function init() {
   const urlPile = params.get("pile");
   const urlPsid = params.get("psid");
   const urlPet = params.get("pet");
-  if (urlPile || urlPsid || urlPet) {
-    if (urlPet) {
+  if (urlPile || urlPsid || urlPet || params.get("clips")) {
+    if (params.get("clips")) {
+      state.list = { source: "clips", id: "clips", cursor: 0, titles: [] };
+    } else if (urlPet) {
       state.list = { source: "pet", id: urlPet, depth: Math.min(parseInt(params.get("petdepth"), 10) || 1, 5), cursor: 0, titles: [] };
     } else if (urlPsid) {
       state.list = { source: "psid", id: urlPsid, cursor: 0, titles: [] };
@@ -2999,6 +3137,8 @@ async function init() {
   }
 
   rebuildDropdown();
+  loadClips();
+  syncClipChip();
   $("search-input").addEventListener("keydown", handleSearch);
   installCategoryAutocomplete();
   installThumbRecovery();
@@ -3033,6 +3173,10 @@ async function init() {
   });
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
+  $("clips-btn").addEventListener("click", openClips);
+  $("viewer-clip-btn").addEventListener("click", () => {
+    if (state.viewerTitle) toggleClip(state.viewerTitle);
+  });
   $("type-select").addEventListener("change", (e) => setType(e.target.value));
   for (const btn of document.querySelectorAll("#size-toggle [data-size]")) {
     btn.addEventListener("click", () => setSize(btn.getAttribute("data-size")));
@@ -3072,8 +3216,12 @@ async function init() {
     const pileId = p2.get("pile");
     const psid = p2.get("psid");
     const pet = p2.get("pet");
-    if (!cat && !pileId && !psid && !pet) return;
-    if (pileId || psid || pet) {
+    const clips = p2.get("clips");
+    if (!cat && !pileId && !psid && !pet && !clips) return;
+    if (clips) {
+      state.list = { source: "clips", id: "clips", cursor: 0, titles: [] };
+      await loadList();
+    } else if (pileId || psid || pet) {
       if (pet) {
         state.list = { source: "pet", id: pet, depth: Math.min(parseInt(p2.get("petdepth"), 10) || 1, 5), cursor: 0, titles: [] };
       } else if (psid) {

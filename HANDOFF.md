@@ -9,8 +9,20 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-01, v1.15 + v1.16 + v1.17 deployed)
+## Current state (updated 2026-10-01, v1.18 in review; v1.15–v1.17 deployed)
 
+- **2026-10-01 — clips / personal collection (v1.18, this PR).** First slice of the
+  "Personal Collections" roadmap item: every tile and the viewer footer carry a
+  bookmark **Clip** button; clipped files persist in a new `vibe_clips` localStorage
+  key (File: titles, newest first) and a header chip (hidden while empty) shows the
+  count. Clicking it opens the **clips feed** — list mode with `source: 'clips'`, so
+  batching, size/view/type toggles and list-order rendering are reused, not
+  duplicated. URL param `?clips=1` boots/round-trips the feed (local-only by
+  nature — the collection lives in the browser, no account). Unclipping inside the
+  clips feed drops the tile in place (reflow, no reload) and shows End of
+  Collection when the feed empties. Regression: `tests/clips.spec.js` (17
+  assertions). Still open: named/multiple collections, export (copy file list /
+  PagePile-style share), a "remove" affordance distinct from the clip toggle.
 - **2026-10-01 — v1.17 deployed.** v1.16 (broken-thumb recovery) had already been
   deployed from `main`; v1.17 (cross-engine hardening) is now also live — SHA256
   verified local = server = live (`app.js` `ef1c8c7c…`, `index.html` `2a8fc56b…`),
@@ -230,11 +242,11 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&file=<File:Name.ext>][&pile=|&psid=|&pet=&petdepth=]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&file=<File:Name.ext>][&pile=|&psid=|&pet=&petdepth=|&clips=1]`.
   `file=` opens the in-app viewer on that file (issue #23 prototype); it is added
   with `pushState` so browser Back closes the viewer, and dropped on close. The
   popstate handler distinguishes a viewer-only history move from a real navigation
@@ -244,7 +256,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   mode**: the feed renders an external file list instead of a category
   (`pet=` runs a live PetScan query on a category with `petdepth=`; 1h client
   cache). List mode hides the sort pill and treebar; the dropdown shows the
-  list label; clicking any category pill exits list mode. All previous params
+  list label; clicking any category pill exits list mode. `clips=1` (v1.18) is
+  list mode over the local personal collection — same rendering path, titles
+  from `vibe_clips` instead of a remote service. All previous params
   behave exactly as before.
   `path=` is the breadcrumb trail: segments are URI-encoded (category names may
   contain `/` — it becomes `%2F`) and joined with `/`; written only once the trail
@@ -257,8 +271,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   `deep=1` implies shuffle (deep sampling uses the search API); the "Deep ✓" chip in the
   sort pill shows when it's active and toggles it off. `tree=1&depth=N` boots with the
   tree modal open at depth N; both params drop when the modal closes.
-- **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines)
-  and `cv_api_cache_v1` (API response cache).
+- **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines),
+  `cv_api_cache_v1` (API response cache) and `vibe_clips` (personal collection —
+  JSON array of `File:` titles, newest first, v1.18).
 - Categories visited via search/pills/URL are auto-added to `vibe_config`.
 - `cat=` is normalized on read (`asCategoryTitle`): a bare `?cat=Images from X` gets
   the `Category:` prefix instead of failing with `invalidcategory`. Only the prefix is
@@ -376,6 +391,15 @@ python3 -m http.server 8123        # any static server works; no build step
     `tests/engine-matrix.sh` (needs the `:8123` server) — every spec is expected
     green on Chromium, Firefox and WebKit. Automated: `tests/engine-matrix.sh`,
     `tests/engine-quirks.spec.js` (6 assertions).
+26. Clips / personal collection (v1.18): clip a tile (bookmark button in the
+    card footer, or "✂ Clip this" in the viewer footer) → the header chip shows
+    a count and `vibe_clips` gains the `File:` title; clipping again unclips.
+    Clicking the chip opens the clips feed (`clips=1` in URL, "My Clips (N)" in
+    the dropdown, sort pill hidden) showing exactly the clipped files in
+    clip order; unclipping there drops the tile in place and emptying the feed
+    shows End of Collection; reloading keeps the collection (localStorage);
+    `?clips=1` boots straight into the feed. Automated: `tests/clips.spec.js`
+    (17 assertions).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 
@@ -580,6 +604,19 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - `asCategoryTitle()` — `Category:` prefix for bare `?cat=` values (prefix only, no case).
 - `resetAndFetch()` — clears grid, bumps requestId, aborts, refetches.
 - `init()` — URL param bootstrap, event binding, IntersectionObserver.
+
+### Clips / personal collection (v1.18)
+
+- `loadClips()` / `isClipped()` / `toggleClip()` / `syncClipChip()` /
+  `updateClipButtons()` / `syncViewerClipBtn()` / `removeClipCard()` / `openClips()`
+  — localStorage-backed single collection (`vibe_clips`, `File:` titles newest
+  first). Tile buttons carry `data-clip-file` so `updateClipButtons` can keep
+  every rendered instance of a file in step (grid + viewer feed steps).
+- The feed is list mode with `source: 'clips'` — `loadList()` short-circuits
+  (titles = the collection), `listBatch()` renders in clip order, and
+  `writeURL` writes `clips=1` instead of a remote list id. Unclipping inside
+  the feed removes the card + reflows instead of reloading (same philosophy as
+  thumb recovery: a shuffle-like session is never thrown away).
 
 ### Category tree (v1.6)
 
@@ -827,16 +864,12 @@ fine for a snapshot feature, wrong for a live shuffle.
    category until the index heals. Diagnose with a direct search-API probe
    (±`srsort=random`, several categories) before touching app code.
 
-1. **Server git checkout is stale** — `/data/project/commons-vibe/public_html/.git` is an
-   orphaned March checkout (FETCH_HEAD `f3e0b71`; HEAD on a dead `master` ref).
-   Deploys are direct file copies. Either re-init it for git deploys or delete it.
-   **Escalated 2026-09-11:** the whole checkout is web-readable — `/.git/config`
-   (236 B, leaks no credentials — just the public GitHub remote URL), `/.git/HEAD`
-   and `/.git/index` all return HTTP 200. With the `*.md` docs now deleted from
-   `public_html`, this is the last unintended public surface besides the two
-   dashboard dirs above.
-2. **Stray public dirs:** `/articletopic-dashboard/` and `/stats-dashboard/` in
-   `public_html` are served publicly but not in the repo — delete, archive, or fold in.
+1. ~~**Server git checkout is stale**~~ — **Resolved 2026-10-01:** the orphaned
+   `public_html/.git` checkout (web-readable `/.git/config`, `/HEAD`, `/index`) and
+   the stray `/articletopic-dashboard/` + `/stats-dashboard/` dirs were deleted from
+   the server after being archived to the gitignored `cache/server-hygiene-2026-10-01/`
+   (verified live: all former paths 404, app files still 200). Deploys remain direct
+   file copies; the public dir now holds exactly the app files + `vendor/`.
 3. **Mobile video:** tapping a tile navigates to Commons (no touch preview). The old
    README claimed click-to-preview on mobile; copy now says navigation. Implementing
    touch preview (tap-to-play, tap-again-to-open) is a nice future enhancement.
