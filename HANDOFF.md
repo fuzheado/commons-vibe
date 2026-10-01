@@ -9,8 +9,45 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-09-15, v1.15 deployed)
+## Current state (updated 2026-10-01, v1.15 deployed; v1.16 in review)
 
+- **2026-10-01 — broken-thumbnail recovery (v1.16, this PR).** Tiles that failed to
+  load used to stay empty until a page reload — unacceptable in shuffle mode, where
+  reloading discards the drawn set. Four changes:
+  * **Recover in place.** One capture-phase `error` listener on `document` covers the
+    grid, the viewer and every future batch (no per-`<img>` wiring). Per tile: drop
+    `srcset`/`sizes`, refetch the 1x thumb with a cache-busting `thumbretry=N` param
+    (a bare re-assignment of the same URL often refetches nothing — browsers
+    negative-cache failed images), then two more attempts at 1s/3s backoff, then mark
+    the tile `.thumb-dead`. Clicking a dead tile retries it instead of opening the file.
+  * **Why it was needed at all** (measured 2026-10-01, Chromium 1243): when the
+    *chosen* srcset candidate fails, the browser does NOT fall back to `src`. Aborting
+    every 960px request broke **12/12** tiles whose 500px `src` was reachable and fine.
+    One bad request meant one permanently empty tile.
+  * **srcset is now filtered** (`cleanThumbCandidate`): only `/thumb/` bucket URLs
+    ≤1280px may be declared. The API's `responsiveUrls["2"]` **is the original file**
+    whenever the original is barely wider than the requested size — 172 of 783 files
+    (22%) in `Category:Images from Wiki Loves Monuments 2026 in China` are 1200×1800
+    originals of 1.6–2.9 MB, so a fifth of that grid was fetching multi-MB originals
+    for retina slots. Re-checked against live imageinfo: those files now declare a
+    single 960px candidate, while a 1800×1200 control keeps its 1280px 2x.
+  * **`Fix images` button** (header, amber, hidden until needed, shows the dead count):
+    retries the dead tiles, then — if they stay dead — re-resolves only those titles
+    through `api()` with `ttl: 0` (50-title batches) and rewrites their URLs. That is
+    the stale-cache case: alpha/list imageinfo responses live 24h in localStorage, so a
+    URL that went bad is served from cache on a plain reload too. The button never
+    touches feed order, sort, scroll or the URL — which is the whole point versus
+    refreshing the page.
+  * **`?cat=` normalization:** a category without its namespace made the API answer
+    `invalidcategory` and left an empty feed after 4 retries. `asCategoryTitle()` adds
+    the `Category:` prefix — prefix only, never a case change (case-doppelgängers are
+    real: `Category:Chop Suey` vs `Category:Chop suey`).
+  * Removed the old inline `onerror="this.style.display='none'"` on the video/3D tiles:
+    it hid the image and left a silent empty placeholder, the opposite of recovery.
+  * Regression: `tests/thumb-recovery.spec.js` (19 assertions; injects failures by
+    aborting tile requests via route interception) wired into `tests/run.sh`. The five
+    pre-existing specs still pass (viewer 36, category-search 29, header-collapse 25,
+    wrongcase-cat 8, stl 24 assertions).
 - **2026-09-15 — BOTH FEATURES SHIPPED AND LIVE (v1.14.1 badge):** `feature/in-app-viewer`
   (PR #24) and `feature/category-autocomplete` (PR #25) are merged to `main` **and
   deployed** — `index.html`, `app.js`, `style.css` all SHA256-match local = server =
@@ -156,7 +193,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs.
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -186,6 +223,11 @@ Live at **https://commons-vibe.toolforge.org/**.
 - **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines)
   and `cv_api_cache_v1` (API response cache).
 - Categories visited via search/pills/URL are auto-added to `vibe_config`.
+- `cat=` is normalized on read (`asCategoryTitle`): a bare `?cat=Images from X` gets
+  the `Category:` prefix instead of failing with `invalidcategory`. Only the prefix is
+  normalized — never the case, because case-doppelgängers are real categories.
+- Tile `<img>`s carry `data-src-one` (the 1x thumb, `data-src-1x` is NOT a valid
+  dataset key — a digit after the dash is dropped, so it reads as undefined).
 
 ## Run locally
 
@@ -280,6 +322,17 @@ python3 -m http.server 8123        # any static server works; no build step
     in the selected category — no wrong-case twin members — and reaches End of
     Collection instead of looping the twin's files. Automated:
     `tests/wrongcase-cat.spec.js` (8 assertions).
+24. Broken-thumbnail recovery (v1.16): in DevTools block `*.wikimedia.org` image
+    requests and load a feed — the tiles that fail recover on their own within a
+    second or two, with NO page reload (`sort=shuffle` order and the URL must be
+    untouched; a tile that did recover carries `thumbretry=` in its `currentSrc`).
+    Keep them blocked → after ~5s the tiles get an amber outline + "⟳ retry" chip
+    and the header shows a `Fix images <count>` button; unblock, then either click
+    a dead tile or the button → every tile comes back and the button hides itself.
+    Also: a bare `?cat=Chop Suey` (no `Category:` prefix) renders the painting
+    instead of an empty feed, and no tile's `srcset` ever contains a non-/thumb/
+    URL or a bucket wider than 1280px. Automated:
+    `tests/thumb-recovery.spec.js` (19 assertions).
 
 ## Deploy to Toolforge
 
@@ -418,6 +471,11 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - `getBatch()` / `prefetchNext()` — one-batch lookahead queue.
 - `fetchImages()` — orchestration + sentinel fill-up loop (`lastBatchOk`).
 - `buildCard()` — tile DOM; `pickBestVideo()`, `srcsetFor()`, drawer/pill wiring.
+- `installThumbRecovery()` / `recoverThumbImage()` / `fixBrokenThumbs()` — broken-tile
+  recovery (v1.16): capture-phase error listener → drop srcset + cache-busted 1x
+  retry → 1s/3s backoff → `.thumb-dead` → "Fix images" button → `reResolveThumbUrls()`.
+  `cleanThumbCandidate()` filters srcset candidates to /thumb/ buckets ≤1280px.
+- `asCategoryTitle()` — `Category:` prefix for bare `?cat=` values (prefix only, no case).
 - `resetAndFetch()` — clears grid, bumps requestId, aborts, refetches.
 - `init()` — URL param bootstrap, event binding, IntersectionObserver.
 

@@ -360,3 +360,45 @@
     min-width: 40px;
   }
 }
+
+/* Broken-thumbnail recovery (v1.16).
+ * "Fix images" lives in the header but stays invisible until a tile actually
+ * gives up — .show is toggled by app.js (same pattern as .stl-loading above,
+ * which avoids depending on Tailwind's hidden/flex ordering). */
+.thumb-fix-btn { display: none; }
+.thumb-fix-btn.show { display: flex; }
+
+/* A tile whose image could not be recovered after the retry ladder. Amber
+ * outline + a non-interactive "retry" chip; the click itself is handled in
+ * app.js (capture phase), where clicking a dead tile retries instead of
+ * opening the file, so this overlay must not swallow the pointer. */
+.thumb-dead {
+  position: relative;
+  outline: 1px dashed rgba(245, 158, 11, 0.55);
+  outline-offset: -2px;
+}
+
+.thumb-dead::after {
+  content: "⟳ retry";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 30;
+  padding: 3px 9px;
+  border-radius: 9999px;
+  border: 1px solid rgba(245, 158, 11, 0.5);
+  background: rgba(0, 0, 0, 0.6);
+  color: rgb(252, 211, 77);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+/* The viewer's stage image gets the same treatment, positioned by the stage. */
+#viewer-media.thumb-dead::after {
+  content: "⟳ thumbnail failed — click to retry";
+}
