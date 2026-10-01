@@ -32,6 +32,7 @@ CommonsVibe uses a **responsive masonry grid** to showcase images in a fluid, vi
 * **Infinite Discovery:** As you scroll, the app automatically fetches more content, creating a seamless "infinite scroll" that keeps the inspiration flowing.
 * **Lazy Loading:** High-quality media loads efficiently only as you need it — video bytes aren't even fetched until you hover — keeping the interface quick and modern.
 * **Instant Revisits:** API responses are cached client-side, so categories you've already visited render instantly on return, no network round-trip.
+* **Self-healing tiles:** if a thumbnail request fails (the thumbnail servers shed load under bursts), the tile retries in place — no page reload, so a shuffle session is never thrown away. If some tiles still won't load, a **Fix images** chip appears in the header and repairs them by re-resolving just those files.
 
 ### Explore by "Vibe"
 Most users aren't familiar with the intricate category tree of Wikimedia Commons. To assist in this:

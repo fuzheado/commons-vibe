@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.15 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.16 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -14,6 +14,14 @@
  * match category titles case-insensitively, so shuffle/deep draws can leak
  * members of a wrong-case doppelgänger (Chop Suey vs Chop suey); drawn pages
  * are verified against their own category list (exact title) before render.
+ * Broken-thumb recovery (v1.16): a failed tile image retries IN PLACE — srcset
+ * dropped, 1x thumb refetched with a cache-buster, 1s/3s backoff — instead of
+ * leaving an empty tile until a reload (which would throw away a shuffle feed).
+ * srcset candidates are filtered to /thumb/ buckets <=1280px, so the API's
+ * original-file `responsiveUrls["2"]` never lands in a tile, and a "Fix images"
+ * button appears only when tiles stay dead, re-resolving their titles from the
+ * API (uncached) before retrying. `?cat=` without its namespace now gets the
+ * `Category:` prefix (never a case change — case-doppelgängers are real).
  * Replaces the PyScript/Pyodide runtime (2026.1.1).
  * Same public URL contract: ?cat=<Category>&sort=alpha|shuffle&view=det|min
  * Same localStorage key: vibe_config
@@ -34,7 +42,7 @@ const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.15"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.16"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -397,6 +405,18 @@ async function buildTreeLevel(catTitle) {
 }
 
 const catDisplayName = (t) => t.replace("Category:", "").replaceAll("_", " ");
+
+// A category arriving from a URL may lack its namespace (`?cat=Images from X`),
+// which makes the Action API answer `invalidcategory` and leaves an empty feed.
+// Normalize the PREFIX only — never the case: Commons has genuine
+// case-doppelgängers (Category:Chop Suey, the Hopper painting, vs
+// Category:Chop suey, the dish), so flipping a letter here would silently point
+// the feed at the twin. See the two-normalization rule in AGENTS.md.
+const asCategoryTitle = (c) => {
+  const raw = String(c || "").trim();
+  if (!raw) return "";
+  return raw.toLowerCase().startsWith("category:") ? raw : "Category:" + raw;
+};
 
 /* ---------------- media type filter ---------------- */
 
@@ -880,16 +900,232 @@ function slotWidthPx() {
 // while thumbwidth reports the REQUESTED width — so parse the served width from
 // the URL and declare that. responsiveUrls (from imageinfo, when present)
 // supplies the API-sanctioned hiDPI candidate instead of string surgery.
+//
+// Candidates are FILTERED (see cleanThumbCandidate): responsiveUrls["2"] IS the
+// original file whenever the original is barely wider than the requested size
+// (measured 2026-10-01: 172 of 783 files in one Wiki Loves Monuments category),
+// and handing a multi-MB original to a retina tile bloats every batch and widens
+// the failure surface. `base` is the 1x thumb — buildCard keeps it in
+// data-src-one so the recovery ladder has a cheap URL to fall back to. (Named
+// `-one`, not `-1x`: a `data-` attribute with a digit after the dash is not a
+// valid dataset key, so `dataset.src1x` would silently be undefined.)
 function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
   const m = /\/(\d+)px-[^/]*$/.exec(thumbUrl);
-  if (!m) return { srcset: "", sizes: "" };
+  if (!m) return { srcset: "", sizes: "", base: thumbUrl };
   const entries = [`${thumbUrl} ${m[1]}w`];
+  const seen = new Set([m[1]]);
   for (const key of Object.keys(responsiveUrls || {})) {
-    const u = cleanUrl(responsiveUrls[key]);
-    const rm = /\/(\d+)px-[^/]*$/.exec(u);
-    if (rm && rm[1] !== m[1]) entries.push(`${u} ${rm[1]}w`);
+    const u = cleanThumbCandidate(responsiveUrls[key]);
+    if (!u) continue;
+    const w = String(thumbBucketWidth(u));
+    if (seen.has(w)) continue;
+    seen.add(w);
+    entries.push(`${u} ${w}w`);
   }
-  return { srcset: entries.join(", "), sizes: `${slotPx}px` };
+  return { srcset: entries.join(", "), sizes: `${slotPx}px`, base: cleanUrl(thumbUrl) };
+}
+
+/* ---------------- broken-thumbnail recovery ---------------- */
+// A tile <img> fails for reasons that have nothing to do with the file: the thumb
+// host sheds load under a burst (429), a connection times out, or the 2x candidate
+// the browser picked for a retina slot is not servable. The browser does NOT fall
+// back to `src` when the CHOSEN srcset candidate fails — verified in Chromium
+// 2026-10-01: aborting every 960px request broke 12/12 tiles whose 500px `src` was
+// reachable and fine. So one bad request used to leave a permanently empty tile,
+// curable only by a page reload — which in shuffle mode throws the feed away.
+// Instead, recover in place:
+//
+//   1. drop srcset/sizes, retry the 1x thumb with a cache-busted URL (a bare
+//      re-assignment of the same URL often refetches nothing: browsers
+//      negative-cache a failed image);
+//   2. two more attempts with 1s/3s backoff, so a 429 burst is not amplified;
+//   3. give up on that tile, mark it, and raise the "Fix images" button — which
+//      retries once more and then RE-RESOLVES the failed titles from the API
+//      (uncached), for the case where the cached category response holds a URL
+//      that has since gone bad.
+const THUMB_RETRY_MAX = 3;         // attempts after the first failure
+const THUMB_RETRY_BASE_MS = 1000;  // backoff: 1s, then 3s
+const THUMB_MAX_BUCKET = 1280;     // never escalate a tile past this bucket
+const THUMB_DEAD_CLASS = "thumb-dead";
+const THUMB_SCOPE = ".media-container, .media-wrapper, #viewer-media";
+let thumbFixBusy = false;
+
+const thumbBucketWidth = (u) => {
+  const m = /\/(\d+)px-/.exec(u || "");
+  return m ? Number(m[1]) : 0;
+};
+
+// Only standard-bucket /thumb/ URLs may enter a srcset. An original has no
+// /thumb/ segment and no size bucket, and is never a tile candidate.
+function cleanThumbCandidate(u) {
+  const url = cleanUrl(u || "");
+  if (!url || !url.includes("/thumb/")) return "";
+  const w = thumbBucketWidth(url);
+  if (!w || w > THUMB_MAX_BUCKET) return "";
+  return url;
+}
+
+const stripThumbRetryParam = (u) => String(u).replace(/([?&])thumbretry=\d+/g, "$1").replace(/[?&]$/, "");
+const bustThumbUrl = (u, n) => {
+  const base = stripThumbRetryParam(u);
+  return base + (base.includes("?") ? "&" : "?") + "thumbretry=" + n;
+};
+
+const thumbRetryCount = (img) => Number(img.dataset.thumbRetry || 0);
+
+// The cheapest URL this tile can fetch: the recorded 1x thumb, else the 1x
+// candidate declared in srcset, else whatever src already is.
+function thumbOneX(img) {
+  const declared = ((img.getAttribute("srcset") || "").split(",")[0] || "").trim().split(/\s+/)[0];
+  return img.dataset.srcOne || cleanThumbCandidate(declared) || stripThumbRetryParam(img.src);
+}
+
+const thumbDeadImages = () => [...document.querySelectorAll(`img[data-thumb-dead="1"]`)];
+
+function thumbBox(img) {
+  return img.closest(".media-container, .media-wrapper, #viewer-media") || img;
+}
+
+function reviveThumb(img) {
+  img.removeAttribute("data-thumb-dead");
+  img.dataset.thumbRetry = "0";
+  thumbBox(img).classList.remove(THUMB_DEAD_CLASS);
+}
+
+function markThumbDead(img) {
+  img.setAttribute("data-thumb-dead", "1");
+  thumbBox(img).classList.add(THUMB_DEAD_CLASS);
+  syncThumbFixButton();
+}
+
+function recoverThumbImage(img) {
+  if (!img || img.tagName !== "IMG" || img.dataset.thumbRetry === "off") return;
+  const n = thumbRetryCount(img);
+  if (n === 0) {
+    img.removeAttribute("srcset");
+    img.removeAttribute("sizes");
+    img.dataset.thumbRetry = "1";
+    img.src = bustThumbUrl(thumbOneX(img), 1);
+    return;
+  }
+  if (n < THUMB_RETRY_MAX) {
+    img.dataset.thumbRetry = String(n + 1);
+    const target = thumbOneX(img);
+    const delay = THUMB_RETRY_BASE_MS * 3 ** (n - 1);
+    setTimeout(() => { img.src = bustThumbUrl(target, n + 1); }, delay);
+    return;
+  }
+  markThumbDead(img);
+}
+
+function syncThumbFixButton() {
+  const btn = $("fix-thumbs-btn");
+  if (!btn) return;
+  const n = thumbDeadImages().length;
+  // .show, not Tailwind's hidden/flex pair — display order there is not ours to rely on.
+  btn.classList.toggle("show", n > 0);
+  const count = $("fix-thumbs-count");
+  if (count) count.textContent = n ? String(n) : "";
+}
+
+const settleThumbs = async (imgs, ms) => {
+  await sleep(ms);
+  return imgs.filter((img) => img.complete && img.naturalWidth === 0);
+};
+
+// Stage 2 of the button: the category response may be cached with a thumb URL
+// that has since gone bad (alpha/list responses live 24h in localStorage), so
+// re-resolve just the failed titles — uncached, batched at the API's 50-title
+// limit — and rebuild their srcset through the same filter as first render.
+async function reResolveThumbUrls(imgs) {
+  const byTitle = new Map();
+  for (const img of imgs) {
+    const title = (img.closest("[data-file]") || {}).dataset?.file;
+    if (title && !byTitle.has(title)) byTitle.set(title, img);
+  }
+  if (!byTitle.size) return 0;
+  const titles = [...byTitle.keys()];
+  let fixed = 0;
+  for (let i = 0; i < titles.length; i += 50) {
+    let data;
+    try {
+      data = await api({
+        action: "query",
+        titles: titles.slice(i, i + 50).join("|"),
+        prop: "imageinfo",
+        iiprop: "url|size|mime|mediatype",
+        iiurlwidth: "600",
+      }, { ttl: 0 });
+    } catch (e) {
+      console.warn("thumb re-resolve failed:", e.message);
+      continue;
+    }
+    for (const page of (data.query && data.query.pages) || []) {
+      const img = byTitle.get(page.title);
+      const ii = (page.imageinfo || [])[0];
+      if (!img || !ii || !ii.thumburl) continue;
+      const { srcset, sizes, base } = srcsetFor(cleanUrl(ii.thumburl), slotWidthPx(), ii.responsiveUrls || {});
+      reviveThumb(img);
+      img.dataset.srcOne = base;
+      if (srcset) {
+        img.setAttribute("srcset", srcset);
+        img.setAttribute("sizes", sizes);
+      } else {
+        img.removeAttribute("srcset");
+        img.removeAttribute("sizes");
+      }
+      img.src = bustThumbUrl(base, Date.now());
+      fixed++;
+    }
+  }
+  return fixed;
+}
+
+async function fixBrokenThumbs() {
+  if (thumbFixBusy) return;
+  const imgs = thumbDeadImages();
+  if (!imgs.length) return;
+  thumbFixBusy = true;
+  const btn = $("fix-thumbs-btn");
+  btn?.classList.add("animate-pulse");
+  try {
+    for (const img of imgs) {
+      reviveThumb(img);
+      img.src = bustThumbUrl(thumbOneX(img), Date.now());
+    }
+    syncThumbFixButton();
+    const still = await settleThumbs(imgs, 4000);
+    if (still.length) await reResolveThumbUrls(still);
+  } finally {
+    thumbFixBusy = false;
+    btn?.classList.remove("animate-pulse");
+    syncThumbFixButton();
+  }
+}
+
+function installThumbRecovery() {
+  // `error` does not bubble, but it does capture — one listener covers every
+  // tile, the viewer, and every future batch, without touching each <img>.
+  document.addEventListener("error", (e) => {
+    const img = e.target;
+    if (!img || img.tagName !== "IMG" || !img.closest(THUMB_SCOPE)) return;
+    recoverThumbImage(img);
+  }, true);
+  // Clicking a dead tile retries it instead of opening the file/viewer.
+  document.addEventListener("click", (e) => {
+    if (!(e.target instanceof Element)) return;
+    const box = e.target.closest(`.${THUMB_DEAD_CLASS}`);
+    if (!box) return;
+    const img = box.querySelector("img");
+    if (!img) return;
+    e.preventDefault();
+    e.stopPropagation();
+    reviveThumb(img);
+    img.src = bustThumbUrl(thumbOneX(img), Date.now());
+  }, true);
+  $("fix-thumbs-btn")?.addEventListener("click", fixBrokenThumbs);
+  // Test hook for tests/thumb-recovery.spec.js — the app never reads it.
+  window.__cvThumb = { srcsetFor, cleanThumbCandidate, thumbBucketWidth, deadImages: thumbDeadImages, retryMax: THUMB_RETRY_MAX };
 }
 
 /* ---------------- 3D STL viewer (hover-to-spin) ---------------- */
@@ -1221,6 +1457,8 @@ function renderPages(pages) {
     state.items.push(card);
     placeCard(card);
   }
+  // Tiles replaced by a new batch may have carried the broken-thumb state.
+  syncThumbFixButton();
 }
 
 function buildCard(page) {
@@ -1254,8 +1492,8 @@ function buildCard(page) {
   const thumbUrl = cleanUrl(info.thumburl || "");
   const tw = info.thumbwidth || 16;
   const th = info.thumbheight || 9;
-  const { srcset, sizes } = srcsetFor(thumbUrl, slotWidthPx(), info.responsiveUrls);
-  const srcsetAttr = srcset ? `srcset="${esc(srcset)}" sizes="${esc(sizes)}"` : "";
+  const { srcset, sizes, base: thumbBase } = srcsetFor(thumbUrl, slotWidthPx(), info.responsiveUrls);
+  const srcsetAttr = srcset ? `srcset="${esc(srcset)}" sizes="${esc(sizes)}" data-src-one="${esc(thumbBase)}"` : `data-src-one="${esc(thumbBase)}"`;
 
   let catHtml = "";
   if (page.categories) {
@@ -1277,7 +1515,7 @@ function buildCard(page) {
   if (is3D) {
     mediaHtml = `
       <div class="relative w-full overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}" data-stl="${esc(fileUrl)}">
-        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
+        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover thumb-img" loading="lazy" decoding="async">
         <div class="absolute top-2 left-2 z-10 bg-purple-700 text-white text-[8px] font-bold px-1.5 py-0.5 rounded">3D</div>
         <div class="absolute bottom-2 right-2 z-10 bg-black/70 text-zinc-200 text-[8px] font-bold px-1.5 py-0.5 rounded transition-opacity duration-200 opacity-0 group-hover:opacity-100 pointer-events-none">drag to spin · wheel to zoom</div>
         <div class="stl-loading absolute inset-0 z-20 items-center justify-center bg-zinc-900/80"><span class="text-[10px] font-mono text-blue-400 animate-pulse">loading model…</span></div>
@@ -1286,7 +1524,7 @@ function buildCard(page) {
     mediaHtml = `
       <div class="relative w-full overflow-hidden bg-zinc-800 media-container" style="aspect-ratio: ${tw}/${th}">
         <div class="absolute inset-0 flex items-center justify-center opacity-20 media-placeholder"><svg class="w-12 h-12" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 14.5v-9l6 4.5-6 4.5z"/></svg></div>
-        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-0 thumb-img" loading="lazy" decoding="async" onerror="this.style.display='none'">
+        <img src="${esc(thumbUrl)}" ${srcsetAttr} class="w-full h-full object-cover transition-opacity duration-300 group-hover:opacity-0 thumb-img" loading="lazy" decoding="async">
         <video src="${esc(mediaSrc)}" class="absolute inset-0 w-full h-full object-cover opacity-0 transition-opacity duration-300 group-hover:opacity-100 media-element" muted loop playsinline preload="none"></video>
       </div>`;
   } else if (isAudio) {
@@ -2695,8 +2933,8 @@ async function init() {
   const params = new URLSearchParams(location.search);
   const urlCat = params.get("cat");
   if (urlCat) {
-    state.currentCategory = urlCat;
-    addCategoryToConfig(urlCat);
+    state.currentCategory = asCategoryTitle(urlCat);
+    addCategoryToConfig(state.currentCategory);
   }
   if (params.get("sort") === "shuffle") {
     state.sortShuffle = true;
@@ -2750,6 +2988,7 @@ async function init() {
   rebuildDropdown();
   $("search-input").addEventListener("keydown", handleSearch);
   installCategoryAutocomplete();
+  installThumbRecovery();
   $("refresh-btn").addEventListener("click", handleRefresh);
   $("edit-list-btn").addEventListener("click", handleEditList);
   $("modal-cancel").addEventListener("click", handleModalCancel);

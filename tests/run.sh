@@ -1,6 +1,8 @@
 #!/bin/bash
-# TDD runner for the 3D STL viewer, the version-consistency guard, and the
-# category type-ahead combobox.
+# TDD runner: version-consistency guard, then every behavioral spec —
+# viewer (in-app media viewer), category-search (type-ahead combobox),
+# thumb-recovery (broken-thumbnail recovery, v1.16), STL (3D viewer),
+# header-collapse (touch header), wrongcase-cat (case-doppelgänger guard).
 #
 #   tests/run.sh          → guard, specs, then (on green) the recorded video tour
 #
@@ -40,6 +42,12 @@ playwright-cli run-code --filename=tests/header-collapse.spec.js >/dev/null 2>&1
 echo "▶ Running wrong-case-cat spec (CirrusSearch case leak, v1.14.1)..."
 playwright-cli run-code --filename=tests/wrongcase-cat.spec.js >/dev/null 2>&1 && echo "✔ wrong-case-cat spec: all assertions pass" || {
   echo "✘ wrong-case spec failed — run 'playwright-cli run-code --filename=tests/wrongcase-cat.spec.js' for details"
+  exit 1
+}
+
+echo "▶ Running broken-thumbnail recovery spec (v1.16, failure injection)..."
+playwright-cli run-code --filename=tests/thumb-recovery.spec.js >/dev/null 2>&1 && echo "✔ thumb-recovery spec: all assertions pass" || {
+  echo "✘ thumb-recovery spec failed — run 'playwright-cli run-code --filename=tests/thumb-recovery.spec.js' for details"
   exit 1
 }
 
