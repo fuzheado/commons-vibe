@@ -538,6 +538,14 @@ python3 -m http.server 8123        # any static server works; no build step
     measured `offsetHeight`). The print/PDF sheet inherits it — full names
     instead of CAPS truncation. Automated: `tests/title-wrap.spec.js`
     (10 assertions — computed-style contract + real-title wrap/no-overflow).
+30. Toolbar ergonomics (v1.24): ↻ Re-shuffle sits directly beside the
+    Alpha⇄Shuffle pill (swapped with Fix images); **Fix images** is one line
+    and muted (zinc-900/50 ground, zinc-700 border, `text-amber-200/70`, amber
+    only on hover) and can no longer be squeezed into wrapping (`shrink-0
+    whitespace-nowrap` — it used to break to two lines below ~1100px);
+    **Export** moved to the top row, immediately left of the ℹ About button.
+    Automated: `tests/thumb-recovery.spec.js` (2 new assertions — one-line
+    and `white-space: nowrap` at a squeezed 1024px viewport).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 

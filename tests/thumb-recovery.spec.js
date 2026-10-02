@@ -147,6 +147,21 @@ async page => {
       t("dead: tiles marked after the retry ladder", dead.dead > 0, `${dead.dead} tile(s) dead`);
       t("dead: Fix images button visible", dead.btnVisible && dead.btnVisible.shown === true, JSON.stringify(dead.btnVisible));
       t("dead: button shows the dead count", dead.btnVisible && dead.btnVisible.count === String(dead.dead), JSON.stringify(dead.btnVisible));
+      // v1.24: the button must stay one line and keep its min-content width in a
+      // squeezed 1024px toolbar — it used to wrap to two lines (user report).
+      await p.setViewportSize({ width: 1024, height: 720 });
+      const geom = await p.evaluate(() => {
+        const b = document.getElementById("fix-thumbs-btn");
+        const svg = b.querySelector("svg");
+        const span = b.querySelector("span");
+        return {
+          sameLine: Math.abs(svg.getBoundingClientRect().top - span.getBoundingClientRect().top) < 6,
+          nowrap: getComputedStyle(b).whiteSpace,
+          w: Math.round(b.getBoundingClientRect().width),
+        };
+      });
+      t("dead: Fix images stays on one line at 1024px", geom.sameLine, `w=${geom.w}px, white-space=${geom.nowrap}`);
+      t("dead: Fix images cannot wrap (white-space: nowrap)", geom.nowrap === "nowrap", geom.nowrap);
     } finally {
       await ctx.unroute(THUMB_RE);
     }
