@@ -34,7 +34,7 @@ async page => {
   const SMALL = `${BASE}/?cat=Category%3AChop%20Suey&sort=alpha&view=det&size=m`;
   const THUMB_RE = /(thumb|upload)\.wikimedia\.org/;
 
-  const snapshot = () => page.evaluate(() => {
+  const snapshot = (pg = page) => pg.evaluate(() => {
     const imgs = [...document.querySelectorAll(".media-container img")];
     const broken = imgs.filter((i) => i.complete && i.naturalWidth === 0);
     return {
@@ -84,7 +84,13 @@ async page => {
 
   // ---------- 2. transient failure heals in place, without a reload ----------
   await step("live: in-place recovery", async () => {
-    const ctx = page.context();
+    // Fresh context = guaranteed-cold HTTP cache: the abort route must SEE the
+    // thumb requests, but a warm session serves repeat visits from cache with
+    // no network hit, so the route never fires and the step tests nothing
+    // (observed 2026-10-02 after repeated runs of the same category). A fresh
+    // context is also engine-portable — CDP cache-disabling is Chromium-only.
+    const ctx = await page.context().browser().newContext({ viewport: page.viewportSize() });
+    const p = await ctx.newPage();
     let aborted = 0;
     const seen = new Set();
     await ctx.route(THUMB_RE, (route) => {
@@ -94,32 +100,34 @@ async page => {
       return route.continue();
     });
     try {
-      await page.goto(SMALL, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await page.evaluate(() => { window.__cvNoReload = true; });
-      await page.waitForFunction(() => document.querySelectorAll(".media-container img").length > 0, null, { timeout: 60000 });
-      await page.waitForFunction(() => {
+      await p.goto(SMALL, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await p.evaluate(() => { window.__cvNoReload = true; });
+      await p.waitForFunction(() => document.querySelectorAll(".media-container img").length > 0, null, { timeout: 60000 });
+      await p.waitForFunction(() => {
         const imgs = [...document.querySelectorAll(".media-container img")];
         return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
       }, null, { timeout: 45000 });
-      const s = await snapshot();
-      const alive = await page.evaluate(() => window.__cvNoReload === true);
+      const s = await snapshot(p);
+      const alive = await p.evaluate(() => window.__cvNoReload === true);
       t("live: a tile request was actually failed", aborted > 0, `${aborted} aborted`);
       t("live: every tile recovered", s.broken === 0, `${s.broken} still broken of ${s.tiles}`);
       t("live: recovery used a cache-busted retry URL", s.retried >= 1, `${s.retried} tile(s) on a retry URL`);
       t("live: no page reload (feed/session preserved)", alive);
     } finally {
-      await ctx.unroute(THUMB_RE);
+      await ctx.close();
     }
   });
 
   // ---------- 3. persistent failure raises the button, which fixes it ----------
   await step("live: dead state + Fix images button", async () => {
-    const ctx = page.context();
+    // Fresh context — same cold-cache reasoning as step 2.
+    const ctx = await page.context().browser().newContext({ viewport: page.viewportSize() });
+    const p = await ctx.newPage();
     await ctx.route(THUMB_RE, (route) => route.abort("failed"));
     try {
-      await page.goto(SMALL, { waitUntil: "domcontentloaded", timeout: 60000 });
-      await page.waitForFunction(() => document.querySelectorAll(".media-container.thumb-dead").length > 0, null, { timeout: 45000 });
-      const dead = await snapshot();
+      await p.goto(SMALL, { waitUntil: "domcontentloaded", timeout: 60000 });
+      await p.waitForFunction(() => document.querySelectorAll(".media-container.thumb-dead").length > 0, null, { timeout: 45000 });
+      const dead = await snapshot(p);
       t("dead: tiles marked after the retry ladder", dead.dead > 0, `${dead.dead} tile(s) dead`);
       t("dead: Fix images button visible", dead.btnVisible && dead.btnVisible.shown === true, JSON.stringify(dead.btnVisible));
       t("dead: button shows the dead count", dead.btnVisible && dead.btnVisible.count === String(dead.dead), JSON.stringify(dead.btnVisible));
@@ -127,14 +135,15 @@ async page => {
       await ctx.unroute(THUMB_RE);
     }
     // heal the network, then use the button — this is the "prod button" path
-    await page.click("#fix-thumbs-btn");
-    await page.waitForFunction(() => {
+    await p.click("#fix-thumbs-btn");
+    await p.waitForFunction(() => {
       const imgs = [...document.querySelectorAll(".media-container img")];
       return imgs.length > 0 && imgs.every((i) => i.complete && i.naturalWidth > 0);
     }, null, { timeout: 45000 });
-    const after = await snapshot();
+    const after = await snapshot(p);
     t("button: all tiles restored after clicking Fix images", after.broken === 0 && after.dead === 0, `${after.broken} broken, ${after.dead} dead`);
     t("button: button hides when nothing is broken", after.btnVisible && after.btnVisible.shown === false);
+    await ctx.close();
   });
 
   // ---------- 4. ?cat= without a namespace still renders (prefix normalized) ----------

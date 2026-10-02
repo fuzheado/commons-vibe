@@ -9,9 +9,23 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-01, v1.19 in review; v1.15–v1.18 deployed)
+## Current state (updated 2026-10-02, v1.20 in review; v1.15–v1.19 deployed)
 
-- **2026-10-01 — vendored Tailwind + smaller Fix-images button (v1.19, this PR).**
+- **2026-10-02 — lite mode (v1.20, this PR).** Speed-over-quality toggle, first
+  class UI control: the ⚡ **Lite** chip in the header (next to S/M/L). Full mode
+  is untouched (480 request → 500px bucket + 960w retina candidate). In lite,
+  the three feed calls request `iiurlwidth=feedThumbWidth()` — the smallest
+  thumbnail-ladder bucket ≥ the slot width (250/330px in S/M densities, 960/1280
+  in L so nothing is upscaled) — and `srcsetFor` never declares retina (2×)
+  candidates. Measured gain (3-file sample, Featured pictures of birds): retina
+  default ~284KB/tile → lite 330px ~13–43KB/tile ≈ **4–7× less image data**;
+  DPR-1 users ~50% (92→43KB). The **viewer always stays high-res** (1600 request
+  → 1920px bucket) — skim in lite, inspect in full. Precedence: URL param
+  `lite=1`/`lite=0` > localStorage `vibe_lite` > off; the toggle persists per
+  device and `lite=1` in a shared URL carries the choice to the recipient.
+  Different requested width = different cache key, so modes never poison each
+  other's cached API responses. Regression: `tests/lite.spec.js` (15 assertions).
+- **2026-10-01 — vendored Tailwind + smaller Fix-images button (v1.19).**
   Tailwind Play CDN was the app's only third-party script — every visitor contacted
   `cdn.tailwindcss.com` (and it drove the Toolforge CSP console violation). It is now
   **vendored same-origin** (`vendor/tailwindcdn-3.4.16.js`, pinned 3.4.16, MIT),
@@ -253,11 +267,11 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
-- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&file=<File:Name.ext>][&pile=|&psid=|&pet=&petdepth=|&clips=1]`.
+- **URL params:** `?cat=<Category>&sort=alpha|shuffle&view=det|min&size=s|m|l&type=all|image|video|audio|3d&path=<trail>[&deep=1][&tree=1&depth=N][&file=<File:Name.ext>][&pile=|&psid=|&pet=&petdepth=|&clips=1][&lite=1|0]`.
   `file=` opens the in-app viewer on that file (issue #23 prototype); it is added
   with `pushState` so browser Back closes the viewer, and dropped on close. The
   popstate handler distinguishes a viewer-only history move from a real navigation
@@ -269,8 +283,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   cache). List mode hides the sort pill and treebar; the dropdown shows the
   list label; clicking any category pill exits list mode. `clips=1` (v1.18) is
   list mode over the local personal collection — same rendering path, titles
-  from `vibe_clips` instead of a remote service. All previous params
-  behave exactly as before.
+  from `vibe_clips` instead of a remote service. `lite=1`/`lite=0` (v1.20)
+  forces the thumbnail quality mode; absent, the per-device `vibe_lite` pref
+  applies. All previous params behave exactly as before.
   `path=` is the breadcrumb trail: segments are URI-encoded (category names may
   contain `/` — it becomes `%2F`) and joined with `/`; written only once the trail
   has 2+ segments (plain `?cat=X` links stay clean). Category navigation
@@ -283,8 +298,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   sort pill shows when it's active and toggles it off. `tree=1&depth=N` boots with the
   tree modal open at depth N; both params drop when the modal closes.
 - **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines),
-  `cv_api_cache_v1` (API response cache) and `vibe_clips` (personal collection —
-  JSON array of `File:` titles, newest first, v1.18).
+  `cv_api_cache_v1` (API response cache), `vibe_clips` (personal collection —
+  JSON array of `File:` titles, newest first, v1.18) and `vibe_lite` (thumbnail
+  quality pref — "1"/"0", v1.20).
 - Categories visited via search/pills/URL are auto-added to `vibe_config`.
 - `cat=` is normalized on read (`asCategoryTitle`): a bare `?cat=Images from X` gets
   the `Category:` prefix instead of failing with `invalidcategory`. Only the prefix is
@@ -411,6 +427,13 @@ python3 -m http.server 8123        # any static server works; no build step
     shows End of Collection; reloading keeps the collection (localStorage);
     `?clips=1` boots straight into the feed. Automated: `tests/clips.spec.js`
     (17 assertions).
+27. Lite mode (v1.20): the ⚡ Lite chip (next to S/M/L) loads 1× thumbnails —
+    base thumbs drop to the smallest ladder bucket ≥ slot width (330px at M
+    density, 250px at S) and srcset carries no retina (2×) candidates; the
+    viewer still loads full-res. URL `lite=1`/`lite=0` overrides the stored
+    `vibe_lite` pref; the chip toggles + persists per device; toggling redraws
+    the feed (new cache keys, order/serendipity semantics unchanged).
+    Automated: `tests/lite.spec.js` (15 assertions).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 
@@ -618,6 +641,17 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - `asCategoryTitle()` — `Category:` prefix for bare `?cat=` values (prefix only, no case).
 - `resetAndFetch()` — clears grid, bumps requestId, aborts, refetches.
 - `init()` — URL param bootstrap, event binding, IntersectionObserver.
+
+### Lite mode (v1.20)
+
+- `liteThumbWidth()` / `feedThumbWidth()` / `litePref()` / `loadLite()` /
+  `syncLiteUI()` / `toggleLite()` — quality/speed mode used by the three feed
+  call sites (`iiurlwidth: feedThumbWidth()`) and `srcsetFor` (breaks before
+  adding responsiveUrls candidates when `state.lite`). The viewer call site
+  keeps its own 1600 request deliberately.
+- Cache safety: a different requested width produces different API URLs, so
+  full and lite have disjoint localStorage cache entries — no mode can serve
+  the other stale buckets.
 
 ### Clips / personal collection (v1.18)
 

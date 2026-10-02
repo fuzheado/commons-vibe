@@ -10,6 +10,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Visually examine a specific category** by selecting a category from the pull-down menu, and "Minimal" mode to isolate just the images.
 * **Use shuffle mode on a large category** with the "Detailed" setting to quickly explore the variety of a category.
 * **Dial the tile density** with the S/M/L control — from a 6-column wall of thumbnails down to big single-column previews — and the grid reflows instantly.
+* **⚡ Lite mode** — the speed-over-quality toggle: 1× thumbnails with no retina variants (4–7× less image data on hiDPI screens), full resolution always preserved in the viewer. Toggle it in the header or via `?lite=1`.
 * **Jump to different categories** by selecting the image's "tag" button to bring up Commons categories you can click on, visible or hidden.
 * **Browse the category tree** via the sitemap button: see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories. Big trees load 500 at a time with a "Load more" extension — cyclic cross-listings are deduped.
 * **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.
@@ -69,6 +70,7 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 * **Stateful Storage:** User accounts to sync your favorite categories and collections across devices.
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **~~Filtering~~ — shipped in v1.11:** media-type filter (images / video / audio) in the header, applied server-side in shuffle mode and client-side elsewhere. Still open: granular filters (e.g. exclude TIFF specifically).
+* **~~Lite mode~~ — shipped in v1.20:** speed-over-quality toggle (1× thumbs, no retina candidates, viewer stays full-res) via the header chip or `?lite=1`.
 
 ---
 

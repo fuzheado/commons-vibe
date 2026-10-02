@@ -36,6 +36,7 @@ run_spec tests/header-collapse.spec.js "header-collapse spec (issue #17, touch)"
 run_spec tests/wrongcase-cat.spec.js   "wrong-case-cat spec (CirrusSearch case leak)" || exit 1
 run_spec tests/thumb-recovery.spec.js  "thumb-recovery spec (v1.16)"                  || exit 1
 run_spec tests/clips.spec.js           "clips spec (v1.18 — personal collection)"    || exit 1
+run_spec tests/lite.spec.js            "lite spec (v1.20 — speed/quality toggle)"    || exit 1
 run_spec tests/stl.spec.js             "STL spec (3D viewer)"                         || exit 1
 run_spec tests/engine-quirks.spec.js   "engine-quirks spec (cross-engine facts)"      || exit 1
 

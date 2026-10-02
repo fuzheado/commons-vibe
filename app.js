@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.19 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.20 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -41,9 +41,10 @@ const API_BASE = "https://commons.wikimedia.org/w/api.php";
 const LS_KEY = "vibe_config";
 const DISK_CACHE_KEY = "cv_api_cache_v1";
 const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titles, newest first
+const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.19"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.20"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -64,6 +65,7 @@ const state = {
   lastRoulettePicks: [],         // recent roulette landings (anti-repeat; NOT reset per category)
   list: null,                    // list mode: {source:'pile'|'psid'|'pet'|'clips', id, depth?, titles, cursor}
   clips: [],                     // personal collection (localStorage vibe_clips) — File: titles, newest first
+  lite: false,                   // lite mode (v1.20): speed over quality — 1x thumbs, no retina candidates
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   viewerTitle: "",               // file open in the in-app viewer (URL param file=)
   items: [],                     // placed cards in fetch order (reflow source)
@@ -307,6 +309,7 @@ function writeURL(mode) {
     params.set("depth", String(state.treeDepth));
   }
   if (state.viewerTitle) params.set("file", state.viewerTitle);
+  if (state.lite) params.set("lite", "1");
   // path= is appended raw — encodePath already encodes each segment, and
   // URLSearchParams would double-encode the % escapes (the %2520 ugliness).
   let qs = "?" + params.toString();
@@ -558,7 +561,7 @@ async function listBatch() {
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
-    iiurlwidth: "480",
+    iiurlwidth: feedThumbWidth(),
   });
   // Restore the list's own order (imageinfo responses are pageid-ordered).
   const byTitle = new Map(((info.query && info.query.pages) || []).map((p) => [normCat(p.title), p]));
@@ -896,7 +899,7 @@ async function batchInfo(titles) {
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
-    iiurlwidth: "480",
+    iiurlwidth: feedThumbWidth(),
   });
   return (info.query && info.query.pages) || [];
 }
@@ -938,7 +941,7 @@ async function fetchBatch() {
     iiprop: "url|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
-    iiurlwidth: "480",
+    iiurlwidth: feedThumbWidth(),
   };
   if (state.continueToken) Object.assign(params, state.continueToken);
   const data = await api(params, { ttl: 24 * 3600e3 });
@@ -1026,6 +1029,7 @@ function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
   const entries = [`${thumbUrl} ${m[1]}w`];
   const seen = new Set([m[1]]);
   for (const key of Object.keys(responsiveUrls || {})) {
+    if (state.lite) break; // lite mode (v1.20): no retina candidates, ever
     const u = cleanThumbCandidate(responsiveUrls[key]);
     if (!u) continue;
     const w = String(thumbBucketWidth(u));
@@ -1034,6 +1038,71 @@ function srcsetFor(thumbUrl, slotPx, responsiveUrls) {
     entries.push(`${u} ${w}w`);
   }
   return { srcset: entries.join(", "), sizes: `${slotPx}px`, base: cleanUrl(thumbUrl) };
+}
+
+/* ---------------- lite mode (v1.20) ---------------- */
+
+// Speed over quality: every tile fetches ONE 1x thumb — no retina (2×)
+// candidates in srcset, and the base thumb itself is the smallest thumbnail-
+// ladder bucket ≥ the slot width (250/330 in S/M densities, so ~4–7× less
+// image data than the retina default; L-density slots still get 960/1280 so
+// nothing is upscaled). The viewer is untouched — skim in lite, inspect in
+// full. Preference: URL param (lite=1 / lite=0) > localStorage (vibe_lite) >
+// off; the toggle persists per device, while lite=1 in a shared URL carries
+// the choice to the recipient.
+function liteThumbWidth() {
+  const ladder = [250, 330, 500, 960, 1280];
+  return ladder.find((w) => w >= slotWidthPx()) || 1280;
+}
+
+// iiurlwidth for the three feed call sites (alpha / shuffle / list). Full mode
+// keeps the 480 request (= 500px bucket) untouched; lite picks from the ladder.
+// Different requested width = different cache key, so the two modes never
+// poison each other's localStorage entries.
+function feedThumbWidth() {
+  return state.lite ? liteThumbWidth() : 480;
+}
+
+function litePref() {
+  try {
+    return localStorage.getItem(LITE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function loadLite() {
+  const p = new URLSearchParams(location.search);
+  if (p.get("lite") === "1") state.lite = true;
+  else if (p.get("lite") === "0") state.lite = false;
+  else state.lite = litePref();
+}
+
+function syncLiteUI() {
+  const btn = $("lite-btn");
+  if (!btn) return;
+  const on = state.lite;
+  btn.classList.toggle("bg-emerald-600", on);
+  btn.classList.toggle("text-white", on);
+  btn.classList.toggle("border-emerald-500", on);
+  btn.classList.toggle("bg-zinc-900/50", !on);
+  btn.classList.toggle("text-zinc-500", !on);
+  btn.classList.toggle("border-zinc-800", !on);
+  btn.title = on
+    ? "Lite mode is ON — 1× thumbnails for speed. Click for full retina quality."
+    : "Lite mode — load 1× thumbnails (faster, less data). Click to enable.";
+}
+
+function toggleLite() {
+  state.lite = !state.lite;
+  try {
+    localStorage.setItem(LITE_KEY, state.lite ? "1" : "0");
+  } catch (e) {
+    console.warn("lite save failed:", e);
+  }
+  syncLiteUI();
+  updateURL(); // lite=1 written while on; omitted when off (per-device pref)
+  resetAndFetch(); // new iiurlwidth = new cache keys = full redraw
 }
 
 /* ---------------- broken-thumbnail recovery ---------------- */
@@ -3110,6 +3179,8 @@ async function init() {
   const urlSize = params.get("size");
   if (SIZE_COLS[urlSize]) state.size = urlSize;
   syncSizeUI();
+  loadLite(); // URL param lite=1/lite=0 wins over the stored per-device pref
+  syncLiteUI();
   const urlType = params.get("type");
   if (urlType && (urlType === "all" || TYPE_TERM[urlType])) state.type = urlType;
   $("type-select").value = state.type;
@@ -3174,6 +3245,7 @@ async function init() {
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
   $("clips-btn").addEventListener("click", openClips);
+  $("lite-btn").addEventListener("click", toggleLite);
   $("viewer-clip-btn").addEventListener("click", () => {
     if (state.viewerTitle) toggleClip(state.viewerTitle);
   });
@@ -3265,6 +3337,11 @@ async function init() {
     const s2 = p2.get("size");
     if (SIZE_COLS[s2]) state.size = s2;
     syncSizeUI();
+    const l2 = p2.get("lite");
+    if (l2 === "1") state.lite = true;
+    else if (l2 === "0") state.lite = false;
+    else state.lite = litePref();
+    syncLiteUI();
     const t2 = p2.get("type");
     if (t2 === "all" || TYPE_TERM[t2]) {
       state.type = t2;
