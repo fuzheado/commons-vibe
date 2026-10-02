@@ -9,7 +9,41 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.21 in review; v1.15–v1.20 deployed)
+## Current state (updated 2026-10-02, v1.22 shipped with this commit; v1.15–v1.21 deployed)
+
+- **2026-10-02 — export dialog (v1.22, issue #30 phase 1, this commit).** New
+  **Export** button in the header (next to ⚡ Lite) opens a dialog modelled on the
+  tree modal. Scope: **this feed** (the tiles drawn this session — backed by the
+  new `state.feedPages`, populated in `renderPages`, reset by `resetAndFetch`
+  and `redrawFeedInPlace`) or **my clips** (the v1.18 collection; fetched
+  fresh, batched 50 titles per call since the collection is titles-only in
+  localStorage). Limit: 12/24/50/100/500/all. Formats: **JSON** (versioned
+  envelope — `tool`, `version`, `exported`, `scope`, `source`, `count`, `files[]`
+  — the future re-import/shareable-session seed), **CSV** (11 columns, RFC-4180
+  quoting), **plain text** (bare `File:` list, one per line), **wiki gallery**
+  (`<gallery mode="packed">` with description captions; `|`/newlines stripped).
+  Every format has a live preview, **Copy** (`navigator.clipboard`) and
+  **Download** (`Blob` → `commonsvibe-<scope>-<source>-<n>.<ext>`, `.wiki` for
+  the gallery). Metadata is quick-mode only: whatever the tile already carries
+  (title, description, hidden-filtered categories, file/page/thumb URLs,
+  dimensions, mime, mediatype) — the feed's 2-key `iiextmetadatafilter` trim
+  means artist/license are absent; that is the enriched pass of issue #30
+  phase 2, and the dialog says so in its note.
+  **PDF/Print** button calls `window.print()` — the `@media print` block in
+  `style.css` re-lays the feed as a light-themed 3-column contact sheet
+  (masonry columns flattened with `display: contents` so the sheet paginates),
+  hides all chrome, keeps each card intact (`break-inside: avoid`), and a
+  `beforeprint` listener labels the sheet `CommonsVibe — <source> — <n> files
+  — commons-vibe.toolforge.org` (hidden `#print-header`). No jsPDF/vendor —
+  the browser's own print-to-PDF is the renderer (CSP-safe, zero bytes).
+  Verified end to end by rendering a 48-tile sample:
+  `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored artifact).
+  Regression: `tests/export.spec.js` (21 assertions) — empty-feed disabled
+  states, per-format previews (CSV header/Files, TXT bare list, JSON envelope
+  parses, wiki gallery tags), limit slicing, download file naming, clips-scope
+  fetch. The export dialog is intentionally **not** in the URL contract:
+  it is a transient view of state already in the URL (feed) or in localStorage
+  (clips).
 
 - **2026-10-02 — lite toggle preserves the feed (v1.21, this PR).** Reported:
   toggling lite in shuffle mode reshuffled everything. Root cause chain:
@@ -296,7 +330,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (21 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -466,6 +500,17 @@ python3 -m http.server 8123        # any static server works; no build step
     scroll jump — in alpha, shuffle, deep and list modes.
     Automated: `tests/lite.spec.js` (22 assertions, incl. shuffle
     visual-order preservation).
+28. Export (v1.22, issue #30 phase 1): the header **Export** button opens a
+    dialog — scope *this feed* (tiles drawn this session) or *my clips*,
+    limit 12/24/50/100/500/all, format JSON / CSV / plain text / wiki gallery,
+    with a live preview, Copy and Download (`.json`/`.csv`/`.txt`/`.wiki`).
+    **PDF/Print** runs `window.print()` and the `@media print` sheet renders the
+    feed as a light 3-column contact sheet (chrome hidden, cards kept whole,
+    `#print-header` label). Quick metadata only (whatever the tiles carry) —
+    artist/license enrichment is issue #30 phase 2; the JSON `files[]` shape is
+    the seed for the phase-4 shareable-session re-import.
+    Automated: `tests/export.spec.js` (21 assertions). Sample render artifact:
+    `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 

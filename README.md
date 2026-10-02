@@ -71,6 +71,7 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **~~Filtering~~ — shipped in v1.11:** media-type filter (images / video / audio) in the header, applied server-side in shuffle mode and client-side elsewhere. Still open: granular filters (e.g. exclude TIFF specifically).
 * **~~Lite mode~~ — shipped in v1.20:** speed-over-quality toggle (1× thumbs, no retina candidates, viewer stays full-res) via the header chip or `?lite=1`.
+* **~~Export~~ — first slice shipped in v1.22:** the header **Export** button exports the current feed or your clips as JSON / CSV / plain text / wiki gallery markup (copy or download), or prints the feed as a light 3-column PDF contact sheet via the browser's own print-to-PDF. Still open (issue #30): enriched metadata (artist/license), PetScan handoff for whole large categories, and JSON re-import as a shareable session.
 
 ---
 

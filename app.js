@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.21 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.22 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.21"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.22"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -68,6 +68,8 @@ const state = {
   lite: false,                   // lite mode (v1.20): speed over quality — 1x thumbs, no retina candidates
   path: [],                      // breadcrumb trail, current category last (URL param path=)
   viewerTitle: "",               // file open in the in-app viewer (URL param file=)
+  items: [],                     // placed cards in fetch order (reflow source)
+  feedPages: [],                 // page objects behind state.items (export source, v1.22)
   items: [],                     // placed cards in fetch order (reflow source)
   colCount: 0,                   // live column count
   colHeights: [],                // tracked column heights for shortest-col place
@@ -683,6 +685,191 @@ function openClips() {
   resetAndFetch();
 }
 
+/* ---------------- export (v1.22 — issue #30, phase 1) ---------------- */
+
+// Quick export: only metadata already loaded on the tiles (title, description,
+// categories, URLs, dimensions — the feed's 2-key extmetadata trim means NO
+// artist/license here; the enriched pass is issue #30 phase 2). The clips
+// scope fetches its own imageinfo (the collection lives in localStorage, not
+// in the feed), batched at the API's 50-title limit.
+
+let exportData = null;     // gathered files for the selected scope
+let exportScope = "feed";  // 'feed' | 'clips'
+
+function exportFileFromPage(p) {
+  const info = {};
+  if (p.imageinfo && p.imageinfo[0]) Object.assign(info, p.imageinfo[0]);
+  if (p.videoinfo && p.videoinfo[0]) Object.assign(info, p.videoinfo[0]);
+  const em = info.extmetadata || {};
+  const emVal = (k) => cleanHtml((em[k] && em[k].value) || "");
+  return {
+    title: p.title,
+    description: emVal("ImageDescription") || emVal("ObjectName") || p.title.replace("File:", ""),
+    categories: (p.categories || []).map((c) => c.title),
+    fileUrl: cleanUrl(info.url || ""),
+    pageUrl: cleanUrl(info.descriptionurl || "") || `https://commons.wikimedia.org/wiki/${quotePath(p.title)}`,
+    thumbUrl: cleanUrl(info.thumburl || ""),
+    width: info.width || null,
+    height: info.height || null,
+    bytes: info.size || null,
+    mime: info.mime || "",
+    mediatype: (info.mediatype || "").toLowerCase(),
+  };
+}
+
+async function gatherExportFiles(scope) {
+  if (scope === "feed") return state.feedPages.map(exportFileFromPage);
+  // clips: the collection is titles-only — fetch what export needs (batched).
+  const files = [];
+  for (let i = 0; i < state.clips.length; i += 50) {
+    const data = await api({
+      action: "query",
+      titles: state.clips.slice(i, i + 50).join("|"),
+      prop: "imageinfo|videoinfo|categories",
+      clprop: "hidden",
+      cllimit: "max",
+      iiprop: "url|size|extmetadata|mediatype|mime",
+      iiextmetadatafilter: "ImageDescription|ObjectName",
+      viprop: "url",
+    }, { ttl: 0 });
+    for (const p of (data.query && data.query.pages) || []) {
+      if (!p.missing) files.push(exportFileFromPage(p));
+    }
+  }
+  return files;
+}
+
+// The scope's human label — used in JSON "source", wiki caption, filenames.
+function exportSourceLabel() {
+  if (exportScope === "clips") return "My clips (CommonsVibe personal collection)";
+  if (state.list) {
+    const L = state.list;
+    return L.source === "pile" ? `PagePile ${L.id}` : L.source === "psid" ? `PetScan ${L.id}` : L.source === "pet" ? `PetScan: ${L.id}` : "My clips";
+  }
+  return state.currentCategory || "CommonsVibe feed";
+}
+
+function csvCell(v) {
+  const s = String(v ?? "");
+  return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
+}
+
+function formatExport(files, fmt) {
+  if (fmt === "txt") return files.map((f) => f.title).join("\n") + "\n";
+  if (fmt === "csv") {
+    const head = "title,description,categories,media_type,width,height,bytes,mime,file_url,page_url,thumb_url";
+    const rows = files.map((f) => [
+      f.title, f.description, f.categories.join("; "), f.mediatype,
+      f.width ?? "", f.height ?? "", f.bytes ?? "", f.mime,
+      f.fileUrl, f.pageUrl, f.thumbUrl,
+    ].map(csvCell).join(","));
+    return head + "\n" + rows.join("\n") + "\n";
+  }
+  if (fmt === "json") {
+    return JSON.stringify({
+      tool: "CommonsVibe",
+      version: VERSION,
+      exported: new Date().toISOString(),
+      scope: exportScope,
+      source: exportSourceLabel(),
+      count: files.length,
+      files,
+    }, null, 2);
+  }
+  if (fmt === "wiki") {
+    // Captions are description-only by default; artist/license attribution is
+    // the enriched pass (phase 2) — the feed trim does not carry them.
+    const cap = (s) => String(s || "").replace(/[|\n\r]/g, " ").trim();
+    const body = files.map((f) => `${f.title}|${cap(f.description)}`).join("\n");
+    return `<gallery mode="packed" caption="${cap(exportSourceLabel())} — via CommonsVibe">\n${body}\n</gallery>\n`;
+  }
+  return "";
+}
+
+const EXPORT_MIME = { json: "application/json", csv: "text/csv", txt: "text/plain", wiki: "text/plain" };
+const EXPORT_EXT = { json: "json", csv: "csv", txt: "txt", wiki: "wiki" };
+
+function exportSelection() {
+  const files = exportData ? exportData.files : [];
+  const lim = $("export-limit").value;
+  const out = lim === "all" ? files : files.slice(0, Number(lim) || files.length);
+  return { files: out, fmt: document.querySelector('input[name="export-format"]:checked').value };
+}
+
+function updateExportPreview() {
+  const { files, fmt } = exportSelection();
+  const text = formatExport(files, fmt);
+  const pre = $("export-preview");
+  const MAX = 3000;
+  pre.textContent = text.length > MAX
+    ? text.slice(0, MAX) + `\n… (preview truncated — ${files.length} file${files.length === 1 ? "" : "s"} total)`
+    : text;
+  $("export-download").disabled = !files.length;
+  $("export-copy").disabled = !files.length;
+}
+
+async function refreshExportScope(scope) {
+  exportScope = scope;
+  const note = $("export-note");
+  note.textContent = scope === "clips"
+    ? "Exporting your clips collection (fetched fresh — artist/license fields come with the enriched pass, issue #30 phase 2)."
+    : "Quick export of the tiles drawn in this session — metadata as loaded (title, description, categories, URLs, dimensions). Artist/license fields come with the enriched pass (issue #30 phase 2).";
+  if (scope === "clips" && !state.clips.length) {
+    exportData = { scope, files: [] };
+    updateExportPreview();
+    return;
+  }
+  $("export-preview").textContent = "Loading…";
+  try {
+    const files = await gatherExportFiles(scope);
+    exportData = { scope, files };
+  } catch (e) {
+    console.warn("export gather failed:", e);
+    exportData = { scope, files: [] };
+    note.textContent = `Export data could not be fetched: ${e.message}`;
+  }
+  updateExportPreview();
+}
+
+function openExportModal() {
+  $("export-modal").classList.remove("hidden");
+  $("export-feed-count").textContent = `(${state.feedPages.length} drawn)`;
+  $("export-clips-count").textContent = `(${state.clips.length})`;
+  const clipsRadio = document.querySelector('input[name="export-scope"][value="clips"]');
+  clipsRadio.disabled = !state.clips.length;
+  if (!state.clips.length && exportScope === "clips") exportScope = "feed";
+  document.querySelector(`input[name="export-scope"][value="${exportScope}"]`).checked = true;
+  refreshExportScope(exportScope);
+}
+
+function closeExportModal() {
+  $("export-modal").classList.add("hidden");
+}
+
+function handleExportCopy() {
+  const { files, fmt } = exportSelection();
+  const text = formatExport(files, fmt);
+  navigator.clipboard.writeText(text).then(
+    () => { $("export-copy").textContent = "Copied ✓"; setTimeout(() => { $("export-copy").textContent = "Copy"; }, 1500); },
+    (e) => console.warn("clipboard failed:", e),
+  );
+}
+
+function handleExportDownload() {
+  const { files, fmt } = exportSelection();
+  if (!files.length) return;
+  const text = formatExport(files, fmt);
+  const blob = new Blob([text], { type: `${EXPORT_MIME[fmt]};charset=utf-8` });
+  const a = document.createElement("a");
+  const src = exportSourceLabel().replace(/^Category:/, "").replace(/[^\w.-]+/g, "_").slice(0, 40);
+  a.href = URL.createObjectURL(blob);
+  a.download = `commonsvibe-${exportScope}-${src}-${files.length}.${EXPORT_EXT[fmt]}`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+
 /* ---------------- batch fetching (alpha + shuffle) ---------------- */
 
 // Pull up to `limit` unseen titles from search results, marking them seen.
@@ -1145,6 +1332,7 @@ async function redrawFeedInPlace() {
     const ordered = titles.map((t) => byTitle.get(normCat(t))).filter(Boolean);
     $("masonry-container").innerHTML = "";
     state.items = [];
+    state.feedPages = []; // rebuilt below by renderPages from the same pages
     ensureColumns(currentCols());
     renderPages(ordered);
     return true;
@@ -1687,6 +1875,7 @@ function renderPages(pages) {
     const card = buildCard(page);
     if (!card) continue;
     state.items.push(card);
+    state.feedPages.push(page); // export keeps the data behind each rendered tile
     placeCard(card);
   }
   // Tiles replaced by a new batch may have carried the broken-thumb state.
@@ -2455,6 +2644,7 @@ function resetAndFetch() {
   $("load-error").classList.add("hidden");
   $("loading-spinner").classList.remove("hidden");
   state.items = [];
+  state.feedPages = [];
   $("masonry-container").innerHTML = "";
   ensureColumns(currentCols());
   if (state.list) state.list.cursor = 0;
@@ -3303,6 +3493,25 @@ async function init() {
   $("deep-banner-off").addEventListener("click", handleDeepOff);
   $("clips-btn").addEventListener("click", openClips);
   $("lite-btn").addEventListener("click", toggleLite);
+  $("export-btn").addEventListener("click", openExportModal);
+  $("export-close").addEventListener("click", closeExportModal);
+  $("export-copy").addEventListener("click", handleExportCopy);
+  $("export-download").addEventListener("click", handleExportDownload);
+  $("export-print").addEventListener("click", () => window.print());
+  for (const radio of document.querySelectorAll('input[name="export-scope"]')) {
+    radio.addEventListener("change", () => refreshExportScope(radio.value));
+  }
+  for (const radio of document.querySelectorAll('input[name="export-format"]')) {
+    radio.addEventListener("change", updateExportPreview);
+  }
+  $("export-limit").addEventListener("change", updateExportPreview);
+  $("export-modal").addEventListener("click", (e) => {
+    if (e.target === $("export-modal")) closeExportModal();
+  });
+  document.addEventListener("keydown", (e) => {
+    if ($("export-modal").classList.contains("hidden")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeExportModal(); }
+  }, true); // capture: wins over the viewer's Esc while the export dialog is up
   $("viewer-clip-btn").addEventListener("click", () => {
     if (state.viewerTitle) toggleClip(state.viewerTitle);
   });
@@ -3446,6 +3655,16 @@ async function init() {
   // After resetAndFetch so state.items exists for prev/next.
   if (params.get("file")) openViewer(params.get("file"), { push: false });
   lastFeedQS = feedQSFromQS(location.search);
+
+  // Print/PDF: label the contact sheet (v1.22). The sheet itself is the feed
+  // re-laid-out by the @media print rules in style.css.
+  const setPrintLabel = () => {
+    const el = $("print-header");
+    if (!el) return;
+    const label = state.list ? exportSourceLabel() : state.currentCategory.replace(/^Category:/, "").replaceAll("_", " ");
+    el.textContent = `CommonsVibe — ${label} — ${state.feedPages.length} files — commons-vibe.toolforge.org`;
+  };
+  window.addEventListener("beforeprint", setPrintLabel);
 }
 
 init();

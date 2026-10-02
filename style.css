@@ -442,3 +442,87 @@ html {
 #viewer-media.thumb-dead::after {
   content: "⟳ thumbnail failed — click to retry";
 }
+
+/* ---------------- print / PDF contact sheet (v1.22, issue #30 phase 3) ----------------
+   The feed re-laid-out for paper: light theme, the same tiles with their
+   metadata, flowing down the page in a 3-column sheet (display:contents on
+   the masonry columns + CSS multicol on the container — masonry doesn't
+   paginate, this does). Trigger: the Export dialog's "PDF / Print" button
+   (window.print) — choose "Save as PDF" in the browser dialog. */
+
+.print-only { display: none; }
+
+@media print {
+    /* chrome goes away: header, chips, crumbs, drawers, buttons, modals */
+    #app-header, #crumbs, #treebar, #deep-banner, #sentinel, #loading-spinner,
+    #end-message, #load-error, .modal-overlay, .card-footer, .category-drawer,
+    .stl-loading, .audio-play-indicator { display: none !important; }
+
+    html, body {
+        background: #ffffff !important;
+    }
+
+    /* the print header is shown via beforeprint (text set in app.js) */
+    .print-only {
+        display: block !important;
+        font-family: ui-sans-serif, system-ui, sans-serif;
+        font-size: 8pt;
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+        color: #71717a;
+        border-bottom: 1.5pt solid #a1a1aa;
+        padding-bottom: 6pt;
+        margin-bottom: 12pt;
+    }
+
+    /* flatten masonry into a paginating 3-column sheet */
+    #masonry-container {
+        display: block !important;
+        columns: 3;
+        column-gap: 12pt;
+    }
+    .masonry-col {
+        display: contents !important;
+    }
+
+    /* the card keeps the CommonsVibe look — light theme */
+    .group {
+        break-inside: avoid;
+        page-break-inside: avoid;
+        display: block !important;
+        width: 100% !important;
+        margin: 0 0 12pt !important;
+        border: 1px solid #d4d4d8 !important;
+        border-radius: 10px !important;
+        background: #ffffff !important;
+        box-shadow: none !important;
+        overflow: hidden;
+    }
+    .media-container, .media-wrapper {
+        border-radius: 9px 9px 0 0;
+    }
+
+    /* metadata rail: blue caps title + gray description, like the web card */
+    .card-info-wrapper {
+        color: #18181b !important;
+        background: #ffffff !important;
+        padding: 8pt 10pt !important;
+    }
+    .card-info-wrapper h3 {
+        color: #1d4ed8 !important;
+    }
+    .card-info-wrapper p {
+        color: #3f3f46 !important;
+    }
+    a { text-decoration: none !important; }
+
+    /* minimal view prints as a pure image grid (the contact sheet) */
+    .minimal-mode .card-info-wrapper {
+        display: none !important;
+    }
+
+    /* media that cannot render on paper */
+    video, audio, canvas { display: none !important; }
+
+}

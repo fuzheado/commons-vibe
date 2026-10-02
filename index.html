@@ -72,6 +72,63 @@
         </div>
     </div>
 
+    <div id="export-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl max-h-[92vh] flex flex-col shadow-2xl">
+            <div class="flex items-center justify-between px-6 pt-5 pb-4 border-b border-zinc-800">
+                <h2 class="text-sm font-bold text-white">Export</h2>
+                <button id="export-close" class="p-1.5 text-zinc-500 hover:text-white transition-colors" title="Close (Esc)" aria-label="Close export dialog">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+            <div class="px-6 py-4 overflow-y-auto flex-1 flex flex-col gap-4">
+                <div class="flex flex-wrap gap-x-6 gap-y-2">
+                    <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                        <input type="radio" name="export-scope" value="feed" checked class="accent-blue-600"> Feed <span id="export-feed-count" class="text-blue-500 font-mono"></span>
+                    </label>
+                    <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                        <input type="radio" name="export-scope" value="clips" class="accent-blue-600"> My clips <span id="export-clips-count" class="text-blue-500 font-mono"></span>
+                    </label>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400">
+                        Limit
+                        <select id="export-limit" class="bg-zinc-900 text-[10px] font-bold tracking-widest text-zinc-300 border border-zinc-800 rounded-lg px-2 py-1.5 outline-none focus:border-blue-600">
+                            <option value="12">First 12</option>
+                            <option value="24" selected>First 24</option>
+                            <option value="50">First 50</option>
+                            <option value="100">First 100</option>
+                            <option value="500">First 500</option>
+                            <option value="all">Everything drawn</option>
+                        </select>
+                    </label>
+                    <div class="flex gap-4">
+                        <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                            <input type="radio" name="export-format" value="json" class="accent-blue-600"> JSON
+                        </label>
+                        <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                            <input type="radio" name="export-format" value="csv" checked class="accent-blue-600"> CSV
+                        </label>
+                        <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                            <input type="radio" name="export-format" value="txt" class="accent-blue-600"> Text list
+                        </label>
+                        <label class="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-zinc-400 cursor-pointer">
+                            <input type="radio" name="export-format" value="wiki" class="accent-blue-600"> Wiki gallery
+                        </label>
+                    </div>
+                </div>
+                <p id="export-note" class="text-[10px] text-zinc-500 leading-relaxed"></p>
+                <pre id="export-preview" class="bg-black text-zinc-400 font-mono text-[10px] leading-relaxed p-4 border border-zinc-800 rounded-xl overflow-auto max-h-64 whitespace-pre-wrap break-all"></pre>
+            </div>
+            <div class="px-6 py-4 border-t border-zinc-800 flex justify-end gap-2">
+                <button id="export-copy" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors">Copy</button>
+                <button id="export-download" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors">Download</button>
+                <button id="export-print" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-300 bg-zinc-800 hover:bg-purple-600 rounded-lg transition-colors" title="Opens the browser print dialog — save as PDF there">PDF / Print</button>
+            </div>
+        </div>
+    </div>
+
     <div id="about-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl shadow-2xl flex flex-col max-h-[90vh]">
             <div class="flex justify-between items-center p-6 pb-2">
@@ -95,7 +152,7 @@
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span id="app-version">v1.21</span>
+                    <span id="app-version">v1.22</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>
@@ -157,6 +214,11 @@
                         <button data-size="l" class="text-[9px] font-black uppercase tracking-widest px-2 py-1 rounded-full transition-colors text-zinc-500 hover:text-white" title="Large tiles (up to 3 columns)">L</button>
                     </div>
                     <button id="lite-btn" class="text-[9px] font-black uppercase tracking-widest px-2.5 py-1.5 rounded-full border transition-colors bg-zinc-900/50 text-zinc-500 border-zinc-800 hover:text-zinc-300" title="Lite mode — load 1× thumbnails (faster, less data). Click to enable.">⚡ Lite</button>
+                    <button id="export-btn" class="p-2 bg-zinc-800 hover:bg-zinc-700 rounded-lg text-zinc-400 hover:text-white transition-all shadow-lg" title="Export this feed or your clips (JSON, CSV, text list, wiki gallery, PDF)">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
+                        </svg>
+                    </button>
                     <select id="type-select" class="bg-zinc-900/50 text-[9px] font-bold uppercase tracking-widest text-zinc-300 border border-zinc-800 rounded-full px-2.5 py-2 outline-none focus:border-blue-600 cursor-pointer" title="Filter by media type">
                         <option value="all">All Media</option>
                         <option value="image">Images</option>
@@ -198,6 +260,7 @@
 
     <main class="max-w-7xl mx-auto p-4 md:p-8">
         <div id="crumbs" class="hidden mb-4 flex flex-wrap items-center gap-1.5"></div>
+        <div id="print-header" class="print-only"></div>
         <div id="deep-banner" class="hidden mb-4 flex items-center justify-between gap-4 bg-purple-950/40 border border-purple-800/60 rounded-xl px-4 py-2.5">
             <p class="text-[10px] text-purple-300 font-bold uppercase tracking-widest">🌳 Deep shuffle — sampling <span id="deep-banner-cat" class="text-white"></span> and all its subcategories</p>
             <button id="deep-banner-off" class="text-[9px] font-black uppercase tracking-widest text-purple-400 hover:text-white border border-purple-700 hover:border-purple-400 rounded-lg px-3 py-1.5 transition-colors shrink-0" title="Return to plain shuffle (this category only)">Turn Off</button>
