@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.26 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.27 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.26"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.27"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -57,6 +57,7 @@ const state = {
   hasReachedEnd: false,
   seenTitles: new Set(),         // shuffle-mode dedupe within a session
   deepMode: false,               // shuffle across the whole subcategory tree
+  deepSerial: null,              // serial subtree-walk cursor (v1.27, deep+alpha)
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
@@ -926,6 +927,10 @@ async function mapLimit(items, limit, fn) {
 // files — with the 120ms throttle a 500-node walk is safe, just slow cold.
 const DEEP_WALK_DEPTH = 5;
 const DEEP_WALK_MAX_NODES = 500;
+// Serial subtree walk (v1.27, issue #31b). The category budget is a safety cap
+// against pathological trees; termination is guaranteed by the cycle guard
+// (Commons' category graph is a DAG with cycles) plus the finite stack.
+const DEEP_SERIAL_MAX_CATS = 500;
 
 // Enumerate the subtree, returning [{title, files}] (files = direct file count).
 async function collectSubtree(rootCat, { depth = DEEP_WALK_DEPTH, maxNodes = DEEP_WALK_MAX_NODES } = {}) {
@@ -999,6 +1004,86 @@ async function deepSampleTitles() {
   if (!fresh.length) return fallbackDraw(); // genuinely exhausted (or search degraded)
   state.lastDeepPicks = exclude;
   return fresh;
+}
+
+/* ---------------- serial subtree walk (v1.27, issue #31b) ----------------
+ * "Browse entire subtree": a deterministic, ordered walk that streams 12
+ * tiles at a time — nothing enumerates the whole subtree (WLM 2026 holds
+ * 130k+ files). Order: post-order DFS, alphabetical — a category's
+ * subcategories are walked before its own files, so the ROOT's bulk (132,611
+ * direct files in the WLM example) can never bury the subcategories, and every
+ * leaf's files surface before its parents'. The cursor lives in
+ * state.deepSerial so scroll, Back and the lite toggle keep the position;
+ * termination is guaranteed by the seen-category cycle guard plus the
+ * category budget. Category lists come from buildTreeLevel (24h-cached). */
+async function deepSerialTitles(want) {
+  if (!state.deepSerial || state.deepSerial.root !== state.currentCategory) {
+    state.deepSerial = {
+      root: state.currentCategory,
+      stack: [{ kind: "expand", cat: state.currentCategory }], // LIFO work items
+      catsSeen: new Set(),
+      current: null,   // category whose file pages are being drained
+      cursor: null,    // its cmcontinue token
+      budget: DEEP_SERIAL_MAX_CATS,
+      done: false,
+    };
+  }
+  const s = state.deepSerial;
+  const out = [];
+  while (out.length < want && !s.done) {
+    if (s.current) {
+      const params = { action: "query", list: "categorymembers", cmtitle: s.current, cmtype: "file", cmlimit: "50" };
+      if (s.cursor) Object.assign(params, s.cursor);
+      let data;
+      try {
+        data = await api(params, { ttl: 24 * 3600e3 });
+      } catch (e) {
+        console.warn("deep browse: skipping", s.current, e.message);
+        s.current = null;
+        s.cursor = null;
+        continue;
+      }
+      s.cursor = data.continue || null;
+      for (const m of (data.query && data.query.categorymembers) || []) {
+        if (state.seenTitles.has(m.title)) continue;
+        state.seenTitles.add(m.title);
+        out.push(m.title);
+      }
+      if (!s.cursor) s.current = null;
+      continue;
+    }
+    if (!s.stack.length) { s.done = true; break; }
+    const item = s.stack.pop();
+    if (item.kind === "files") { s.current = item.cat; s.cursor = null; continue; }
+    // Expand: queue this category's own files LAST, preceded by its
+    // subcategories (pushed reversed so they pop in alphabetical order).
+    s.catsSeen.add(normCat(item.cat));
+    let children = [];
+    if (s.budget > 0) {
+      s.budget--;
+      try {
+        children = (await buildTreeLevel(item.cat)).filter((c) => !s.catsSeen.has(normCat(c.title)));
+      } catch (e) {
+        console.warn("deep browse: expand failed", item.cat, e.message);
+      }
+    }
+    s.stack.push({ kind: "files", cat: item.cat });
+    for (let i = children.length - 1; i >= 0; i--) s.stack.push({ kind: "expand", cat: children[i].title });
+  }
+  return out;
+}
+
+// One serial-walk feed batch: up to 12 new titles, then a single metadata call
+// — the same economics as the alpha crawl, but paged across the whole tree.
+async function deepSerialBatch() {
+  const titles = await deepSerialTitles(12);
+  if (!titles.length) return { pages: [], hasEnded: true };
+  const pages = await batchInfo(titles);
+  // Answer in walk order (batchInfo returns pageid order, like the generator).
+  const byTitle = new Map(pages.map((p) => [p.title, p]));
+  const ordered = titles.map((t) => byTitle.get(t)).filter(Boolean);
+  const ended = !!(state.deepSerial && state.deepSerial.done);
+  return { pages: ordered, hasEnded: ended };
 }
 
 // One spread draw: k distinct weighted categories (excluding `exclude`, which
@@ -1117,6 +1202,9 @@ async function fetchBatch() {
   // Alpha + type filter with a starved crawl: draw matches instead of
   // crawling the whole category (see filteredDrawBatch / fetchImages).
   if (state.type !== "all" && typeDrawFallback) return filteredDrawBatch();
+
+  // Alpha + deep (v1.27, issue #31b): ordered subtree walk, streaming.
+  if (state.deepMode) return deepSerialBatch();
 
   // Alpha: categorymembers generator, cacheable per (category, continue token).
   const params = {
@@ -2542,6 +2630,8 @@ function syncDeepUI() {
   const banner = $("deep-banner");
   if (!banner) return;
   if (state.deepMode) {
+    setText("deep-banner-lead", state.sortShuffle ? "🌳 Deep shuffle — sampling" : "🌳 Deep browse — walking");
+    setText("deep-banner-tail", state.sortShuffle ? "and all its subcategories" : "in order, subcategory by subcategory");
     setText("deep-banner-cat", catDisplayName(state.currentCategory));
     banner.classList.remove("hidden");
     refreshDeepCount();
@@ -2581,10 +2671,12 @@ let typeDrawFallback = false;
 // (T246568) could false-positive here; All Media always recovers.
 async function filteredMatchCount() {
   const catName = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
+  // Deep mode counts the whole subtree (the crawl it is preflighting walks it).
+  const scope = state.deepMode ? "deepcategory" : "incategory";
   const res = await api({
     action: "query",
     list: "search",
-    srsearch: `incategory:"${catName}"${typeSearchTerm()}`,
+    srsearch: `${scope}:"${catName}"${typeSearchTerm()}`,
     srnamespace: "6",
     srlimit: "1",
   }, { ttl: 10 * 60e3 });
@@ -2596,11 +2688,17 @@ async function filteredMatchCount() {
 // instead of crawling the whole category). Deduped through seenTitles; an
 // empty draw ends the feed once every match has been shown.
 async function filteredDrawBatch() {
-  const titles = await flatSampleTitles();
-  // Same wrong-case guard as the shuffle draws — the starve-fallback must only
-  // surface files REALLY in the current category (exact title).
+  // Deep mode draws from the walked subtree (deepSampleTitles), not just the
+  // root — and those picks come from real subcategory titles, so the
+  // wrong-case guard is unnecessary there (it would also wrongly drop every
+  // subcategory file: it checks exact ROOT membership).
+  const titles = state.deepMode ? await deepSampleTitles() : await flatSampleTitles();
   let pages = titles.length ? await batchInfo(titles) : [];
-  pages = pages.filter((p) => inCategory(p, state.currentCategory));
+  if (!state.deepMode) {
+    // Same wrong-case guard as the shuffle draws — the starve-fallback must
+    // only surface files REALLY in the current category (exact title).
+    pages = pages.filter((p) => inCategory(p, state.currentCategory));
+  }
   shuffle(pages);
   return { pages, hasEnded: pages.length === 0 };
 }
@@ -2669,6 +2767,7 @@ function resetAndFetch() {
   treeReqId++;               // any open tree render belongs to the old category
   state.deepWalk = null;     // deep sampler walks the new category's tree
   state.deepPool = null;     // seeded exact-filter set for deep draws
+  state.deepSerial = null;   // serial subtree-walk cursor (deep + alpha)
   state.lastDeepPicks = new Set();
   state.abort.abort();
   state.abort = new AbortController();
@@ -2834,11 +2933,18 @@ function handleSelectChange(e) {
 function handleSortToggle() {
   state.sortShuffle = !state.sortShuffle;
   syncSortUI();
-  // Deep mode requires the shuffle engine (CirrusSearch deepcategory).
-  if (!state.sortShuffle && state.deepMode) {
-    state.deepMode = false;
-    syncDeepUI();
-  }
+  // Deep mode STAYS ON across the toggle (v1.27, issue #31b): shuffle samples
+  // the subtree, alpha walks it in order. The feed refetches either way.
+  resetAndFetch();
+}
+
+// "Browse entire subtree" (tree modal): ordered serial walk of the tree.
+function handleTreeBrowse() {
+  state.deepMode = true;
+  state.sortShuffle = false;
+  syncSortUI();
+  syncDeepUI();
+  closeTreeModal();
   resetAndFetch();
 }
 
@@ -3487,11 +3593,11 @@ async function init() {
     $("view-toggle").classList.replace("bg-blue-600", "bg-zinc-800");
   }
   if (params.get("deep") === "1") {
-    // Deep needs the shuffle engine; force it on.
+    // v1.27 (issue #31b): deep covers alpha (ordered subtree walk) and shuffle
+    // (subtree sampling) — the URL's sort= is respected, default shuffle.
     state.deepMode = true;
-    state.sortShuffle = true;
-    $("sort-knob").style.transform = "translateX(20px)";
-    $("sort-toggle").classList.replace("bg-zinc-700", "bg-purple-600");
+    state.sortShuffle = params.get("sort") !== "alpha";
+    syncSortUI();
     syncDeepUI();
   }
   const urlDepth = parseInt(params.get("depth"), 10);
@@ -3544,7 +3650,8 @@ async function init() {
   $("tree-btn").addEventListener("click", openTreeModal);
   $("tree-close").addEventListener("click", closeTreeModal);
   $("tree-depth").addEventListener("change", handleDepthChange);
-  $("tree-deep-btn").addEventListener("click", handleTreeDeep);
+  wire("tree-deep-btn", "click", handleTreeDeep);
+  wire("tree-browse-btn", "click", handleTreeBrowse);
   $("tree-filter").addEventListener("input", () => {
     clearTimeout(treeFilterTimer);
     treeFilterTimer = setTimeout(applyTreeFilter, 120);
@@ -3663,7 +3770,8 @@ async function init() {
     }
     state.sortShuffle = p2.get("sort") === "shuffle";
     state.deepMode = p2.get("deep") === "1";
-    if (state.deepMode) state.sortShuffle = true;
+    // v1.27 (issue #31b): deep no longer implies shuffle — alpha walks the
+    // subtree in order, shuffle samples it. The URL's sort= decides.
     syncSortUI();
     syncDeepUI();
     state.minimalView = p2.get("view") === "min";
