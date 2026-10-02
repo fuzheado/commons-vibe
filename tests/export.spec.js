@@ -104,6 +104,48 @@ async page => {
   t("clips export: fetched file list", clipTxt.trim() === "File:Chop Suey by Edward Hopper.jpg", clipTxt.slice(0, 60));
   await page.evaluate(() => localStorage.removeItem("vibe_clips"));
 
+  // ── 5. Stale-page resilience (v1.25) ──────────────────────────────────
+  // A cached index.html from an older deploy paired with current JS used to
+  // kill init at the first missing element (reported 2026-10-02: the v1.22
+  // export wiring against a pre-v1.22 page — endless spinner). Serve today's
+  // page with the export ids renamed away and the version fallback rolled
+  // back, then assert init survives: feed renders, one guarded reload is
+  // attempted, no uncaught errors.
+  await page.goto(BASE + "/", { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => sessionStorage.clear());
+  const staleErrors = [];
+  const staleWarns = [];
+  const onErr = (e) => staleErrors.push(e.message);
+  const onMsg = (m) => { if (m.type() === "warning" && /stale page markup/.test(m.text())) staleWarns.push(m.text()); };
+  page.on("pageerror", onErr);
+  page.on("console", onMsg);
+  await page.route("**/*", async (route) => {
+    if (route.request().resourceType() !== "document") return route.continue();
+    const resp = await route.fetch();
+    let body = await resp.text();
+    body = body
+      .replace('id="export-btn"', 'id="export-btn-retired"')
+      .replace('id="export-modal"', 'id="export-modal-retired"')
+      .replace(/<span id="app-version">v[\d.]+<\/span>/, '<span id="app-version">v1.21</span>');
+    await route.fulfill({ response: resp, body });
+  });
+  await page.goto(TILE_URL, { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelectorAll(".group").length >= 1, null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  const stale = await page.evaluate(() => ({
+    tiles: document.querySelectorAll(".group").length,
+    exportBtn: !!document.getElementById("export-btn"),
+    reloadGuard: sessionStorage.getItem("cv_stale_reload"),
+  }));
+  t("stale page: feed still renders (no init hang)", stale.tiles >= 1, `${stale.tiles} tiles`);
+  t("stale page: export control absent, as in the old cache", stale.exportBtn === false);
+  t("stale page: no uncaught errors", staleErrors.length === 0, staleErrors.join("; ") || "clean");
+  t("stale page: version mismatch reported", staleWarns.length >= 1, (staleWarns[0] || "no warning").slice(0, 80));
+  t("stale page: reload attempted at most once (loop guard)", stale.reloadGuard === "1", String(stale.reloadGuard));
+  page.off("pageerror", onErr);
+  page.off("console", onMsg);
+  await page.unroute("**/*");
+
   if (failed) throw `${failed} failed\n${results.join("\n")}`;
   console.log(results.join("\n"));
   return `export spec: all ${results.length} assertions pass`;

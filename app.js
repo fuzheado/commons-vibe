@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.24 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.25 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.24"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.25"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -3390,6 +3390,34 @@ function installCategoryAutocomplete() {
 /* ---------------- boot ---------------- */
 
 async function init() {
+  // Stale-page guard (v1.25). A browser can pair a cached index.html from an
+  // older deploy with a freshly revalidated app.js. Wiring then hits elements
+  // that don't exist yet (e.g. the v1.22 Export markup), init throws mid-way,
+  // and the feed never starts — the "endless spinner in an old profile" bug
+  // (reported 2026-10-02, reproduced with a v1.21 page + v1.24 JS). Detect it
+  // from the HTML's own no-JS version fallback BEFORE it gets overwritten,
+  // try ONE revalidating reload (sessionStorage-guarded against loops), and
+  // if the document is still stale, keep going with tolerant wiring.
+  const htmlFallback = (($("app-version") || {}).textContent || "").trim().replace(/^v/, "");
+  const stalePage = !!htmlFallback && htmlFallback !== VERSION;
+  if (stalePage) {
+    console.warn(`CommonsVibe: stale page markup — HTML v${htmlFallback} is running with JS v${VERSION}.`);
+    if (!sessionStorage.getItem("cv_stale_reload")) {
+      sessionStorage.setItem("cv_stale_reload", "1");
+      console.warn("CommonsVibe: reloading once to fetch the current index.html…");
+      location.reload();
+    } else {
+      console.warn("CommonsVibe: still stale after a reload — continuing with the older markup; controls added after that page was cached stay missing. Hard-refresh (Cmd/Ctrl+Shift+R) to update.");
+    }
+  }
+  // Missing controls must never kill init (see the stale-page guard above):
+  // elements added in later versions are simply not wired when absent.
+  const wire = (id, ev, fn) => {
+    const el = $(id);
+    if (el) el.addEventListener(ev, fn);
+    else if (!stalePage) console.warn(`CommonsVibe: #${id} missing from the page — skipping its wiring.`);
+    return el;
+  };
   console.info(`${UA_NOTE} — JS engine active`);
   const versionEl = $("app-version");
   if (versionEl) versionEl.textContent = `v${VERSION}`;
@@ -3491,25 +3519,26 @@ async function init() {
   });
   $("deep-chip").addEventListener("click", handleDeepOff);
   $("deep-banner-off").addEventListener("click", handleDeepOff);
-  $("clips-btn").addEventListener("click", openClips);
-  $("lite-btn").addEventListener("click", toggleLite);
-  $("export-btn").addEventListener("click", openExportModal);
-  $("export-close").addEventListener("click", closeExportModal);
-  $("export-copy").addEventListener("click", handleExportCopy);
-  $("export-download").addEventListener("click", handleExportDownload);
-  $("export-print").addEventListener("click", () => window.print());
+  wire("clips-btn", "click", openClips);
+  wire("lite-btn", "click", toggleLite);
+  wire("export-btn", "click", openExportModal);
+  wire("export-close", "click", closeExportModal);
+  wire("export-copy", "click", handleExportCopy);
+  wire("export-download", "click", handleExportDownload);
+  wire("export-print", "click", () => window.print());
   for (const radio of document.querySelectorAll('input[name="export-scope"]')) {
     radio.addEventListener("change", () => refreshExportScope(radio.value));
   }
   for (const radio of document.querySelectorAll('input[name="export-format"]')) {
     radio.addEventListener("change", updateExportPreview);
   }
-  $("export-limit").addEventListener("change", updateExportPreview);
-  $("export-modal").addEventListener("click", (e) => {
+  wire("export-limit", "change", updateExportPreview);
+  wire("export-modal", "click", (e) => {
     if (e.target === $("export-modal")) closeExportModal();
   });
   document.addEventListener("keydown", (e) => {
-    if ($("export-modal").classList.contains("hidden")) return;
+    const modal = $("export-modal");
+    if (!modal || modal.classList.contains("hidden")) return;
     if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeExportModal(); }
   }, true); // capture: wins over the viewer's Esc while the export dialog is up
   $("viewer-clip-btn").addEventListener("click", () => {

@@ -9,7 +9,28 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.24 deployed and verified live; v1.15–v1.23 deployed)
+## Current state (updated 2026-10-02, v1.25 deployed and verified live; v1.15–v1.24 deployed)
+
+- **2026-10-02 — stale-page resilience: no more init hangs on cached HTML
+  (v1.25).** Reported: the new build worked in a fresh profile but hung on an
+  endless spinner in an older one, console showing `Uncaught TypeError: Cannot
+  read properties of null (reading 'addEventListener')` at `app.js:3494` — the
+  first v1.22 export wiring. Cause: the profile paired a **cached index.html
+  from before v1.22** with a revalidated app.js; init() wired a button that
+  wasn't in the DOM, threw mid-way and the feed never started (reproduced
+  exactly by serving the v1.21 page with v1.24 JS). Fix, in `init()`:
+  (a) capture the HTML's no-JS version fallback (`#app-version`, read BEFORE it
+  is overwritten) and compare with `VERSION` — on mismatch warn and attempt ONE
+  revalidating `location.reload()`, with a `cv_stale_reload` sessionStorage flag
+  preventing reload loops; (b) a `wire(id, ev, fn)` helper replaces direct
+  `addEventListener` for the post-v1.17 controls (clips, lite, the export
+  block), so a missing element can never kill init; (c) the export Esc handler
+  null-guards `#export-modal`; (d) the `beforeprint` print-header lookup was
+  already guarded. After a stale page loads once the app self-heals with the
+  guarded reload; if the browser refuses to revalidate, it keeps working with
+  the older markup and says so in the console. Belt and braces: deploy
+  `index.html` BEFORE `app.js` when the release is additive (see deploy
+  section). Regression: `tests/export.spec.js` +5 assertions (25 total).
 
 - **2026-10-02 — toolbar fixes: refresh beside the sort pill, muted one-line
   Fix images, export up top (v1.24).** Three reported issues: (a) the ↻
@@ -369,7 +390,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (20 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -549,7 +570,7 @@ python3 -m http.server 8123        # any static server works; no build step
     `#print-header` label). Quick metadata only (whatever the tiles carry) —
     artist/license enrichment is issue #30 phase 2; the JSON `files[]` shape is
     the seed for the phase-4 shareable-session re-import.
-    Automated: `tests/export.spec.js` (20 assertions). Sample render artifact:
+    Automated: `tests/export.spec.js` (25 assertions). Sample render artifact:
     `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored).
 29. Title treatment (v1.23): DET tile titles are **case-faithful** (the CSS
     `uppercase`/`tracking-widest` are gone) and **wrap to the full filename**
@@ -647,6 +668,12 @@ cat vendor/tailwindcdn-3.4.16.js | ssh alih@dev.toolforge.org \
   'sudo -niu tools.commons-vibe sh -c "cat > /data/project/commons-vibe/public_html/vendor/tailwindcdn-3.4.16.js"'
 # ...same for vendor/OrbitControls.js and vendor/LICENSE
 ```
+
+**Deploy order (v1.25):** when a release is additive (new controls, moved ids),
+write `index.html` first, then `app.js` — old JS against the new markup is safe
+(the new page keeps every id it ever had), while new JS against old markup is
+the mismatch the v1.25 stale-page guard now tolerates. For a release that
+REMOVES an element the old JS wires, reverse the order (JS first).
 
 **Never copy `*.md` into `public_html`** — lighttpd ignores `.htaccess`, so they would
 be world-readable. The served directory must contain exactly `index.html`, `app.js`,
@@ -1093,6 +1120,16 @@ fine for a snapshot feature, wrong for a live shuffle.
    never copy `*.md` into `public_html`** (see the deploy section and `AGENTS.md`).
    Root cause: Toolforge serves `public_html` via lighttpd, which ignores the
    repo's `.htaccess` — the old "blocked from web" note was never true.
+
+10. **Lite shuffle-order assertion flakes occasionally in-suite** (seen once,
+    2026-10-02 v1.25 suite run 1; passed standalone and in the immediate re-run).
+    Symptom: `shuffle→lite: SAME tiles, SAME visual order` diffs at one position
+    while both snapshots have 12 tiles — consistent with two tiles swapping
+    visual slots (a masonry placement tie-break) rather than a reshuffle (a
+    reshuffle would diff at 0 and swap almost every tile). If it recurs, capture
+    the full before/after lists and check `redrawFeedInPlace`'s rebuild order
+    versus the column placement of equal-height cards before suspecting the
+    toggle logic.
 
 ## Next features (staged plan, all API-verified)
 
