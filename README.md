@@ -95,14 +95,14 @@ cat index.html | ssh alih@dev.toolforge.org \
   'sudo -niu tools.commons-vibe sh -c "cat > /data/project/commons-vibe/public_html/index.html"'
 ```
 
-Repeat for `app.js`, `style.css`, `categories.txt`, `.htaccess`. Static-file changes need no webservice restart. Full procedure (with verification steps) in `HANDOFF.md`.
+Repeat for `app.js`, `style.css`, `categories.txt`, `.htaccess`, and the `vendor/` libraries (three.js + Tailwind build). Static-file changes need no webservice restart. Full procedure (with verification steps) in `HANDOFF.md`.
 
 ---
 
 ## Technical Overview
 
 CommonsVibe is built to be lightweight and URL-driven.
-* **Engine:** Vanilla JavaScript (ES module) — no framework, no build step. The app ships as `index.html` + `app.js` + `style.css` and boots instantly (previously PyScript/Pyodide; replaced August 2026).
+* **Engine:** Vanilla JavaScript (ES module) — no framework, no build step. The app ships as `index.html` + `app.js` + `style.css` and boots instantly (previously PyScript/Pyodide; replaced August 2026). All JavaScript is served same-origin from Toolforge (Wikimedia infrastructure): three.js is vendored in `vendor/`, and the Tailwind Play CDN build is vendored too (v1.19) — no third-party JS is ever contacted, protecting visitor privacy.
 * **API:** Interacts directly with the Wikimedia Action API and CirrusSearch, with a client-side response cache (localStorage + in-memory, TTL per endpoint kind) so repeat visits and back-navigation are instant. Category-tree data (v1.6: parents, subcats, counts) flows through the same cache — tree re-opens are instant.
 * **Correctness details:** generator + prop responses arrive in pageid order, so alpha mode sorts by title client-side; list mode restores PetScan/PagePile order. All requests pass through a global pacing throttle (polite to Wikimedia's APIs, immune to self-inflicted 429s).
 * **Infinite Scroll:** One-batch prefetch lookahead keeps the grid feeding smoothly; stale requests are aborted.

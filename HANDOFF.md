@@ -9,9 +9,20 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-01, v1.18 in review; v1.15–v1.17 deployed)
+## Current state (updated 2026-10-01, v1.19 in review; v1.15–v1.18 deployed)
 
-- **2026-10-01 — clips / personal collection (v1.18, this PR).** First slice of the
+- **2026-10-01 — vendored Tailwind + smaller Fix-images button (v1.19, this PR).**
+  Tailwind Play CDN was the app's only third-party script — every visitor contacted
+  `cdn.tailwindcss.com` (and it drove the Toolforge CSP console violation). It is now
+  **vendored same-origin** (`vendor/tailwindcdn-3.4.16.js`, pinned 3.4.16, MIT),
+  verified in-browser: zero third-party requests, all utilities still applying
+  (runtime JIT works identically from our origin). The Play CDN build's own
+  "should not be used in production" console warning remains — it is baked into the
+  script, console-only, and tracked under open item 4 (full precompile into
+  `style.css` would remove it). The amber **Fix images** button was also shrunk a
+  step (text 9px→8px/bold, padding p-1 px-1.5, icon 2.5, no shadow) after feedback
+  that it dominated the header.
+- **2026-10-01 — clips / personal collection (v1.18).** First slice of the
   "Personal Collections" roadmap item: every tile and the viewer footer carry a
   bookmark **Clip** button; clipped files persist in a new `vibe_clips` localStorage
   key (File: titles, newest first) and a header chip (hidden while empty) shows the
@@ -241,7 +252,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
-| `vendor/` | Vendored three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE. Same-origin because Toolforge CSP blocks CDN imports; resolved for OrbitControls via the inline import map in `index.html`. |
+| `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
 | `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
@@ -475,6 +486,9 @@ cat index.html | ssh alih@dev.toolforge.org \
 # after any vendor bump, not just on file edits. Same cat-pipe pattern:
 cat vendor/three.module.min.js | ssh alih@dev.toolforge.org \
   'sudo -niu tools.commons-vibe sh -c "mkdir -p /data/project/commons-vibe/public_html/vendor && cat > /data/project/commons-vibe/public_html/vendor/three.module.min.js"'
+# v1.19 also ships the vendored Tailwind build (index.html loads it):
+cat vendor/tailwindcdn-3.4.16.js | ssh alih@dev.toolforge.org \
+  'sudo -niu tools.commons-vibe sh -c "cat > /data/project/commons-vibe/public_html/vendor/tailwindcdn-3.4.16.js"'
 # ...same for vendor/OrbitControls.js and vendor/LICENSE
 ```
 
@@ -873,8 +887,11 @@ fine for a snapshot feature, wrong for a live shuffle.
 3. **Mobile video:** tapping a tile navigates to Commons (no touch preview). The old
    README claimed click-to-preview on mobile; copy now says navigation. Implementing
    touch preview (tap-to-play, tap-again-to-open) is a nice future enhancement.
-4. **Tailwind CDN warning** ("should not be used in production") — pre-existing; a
-   future cleanup could precompile the ~20 utility classes into `style.css`.
+4. **Tailwind is self-hosted Play-CDN build** (`vendor/tailwindcdn-3.4.16.js`,
+   vendored v1.19 — no third-party requests, CSP violation gone) — but it still
+   prints its "should not be used in production" console warning (baked in) and
+   recompiles CSS at runtime. A future cleanup could precompile the utilities
+   into `style.css` to kill both.
 5. **Old build:** the PyScript version is recoverable from git history (commit `7f27078`
    and earlier) if ever needed for reference.
 6. **Cache TTLs** are hardcoded in the `api()` call sites — reasonable defaults, tune if
