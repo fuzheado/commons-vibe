@@ -9,9 +9,29 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.23 shipped with this commit; v1.15–v1.22 deployed)
+## Current state (updated 2026-10-02, v1.24 deployed and verified live; v1.15–v1.23 deployed)
 
-- **2026-10-02 — case-faithful, wrapped tile titles (v1.23, this commit).** DET
+- **2026-10-02 — toolbar fixes: refresh beside the sort pill, muted one-line
+  Fix images, export up top (v1.24).** Three reported issues: (a) the ↻
+  **Re-shuffle** button sat after the Fix-images button; the two are swapped,
+  so refresh is now immediately right of the Alpha⇄Shuffle pill. (b) **Fix
+  images** was bright amber, two lines, and squeezed on narrower toolbars —
+  reproduced on live at 390/1024px: the non-wrapping controls row shrank it
+  to 70px, wrapping the label under the icon. It now carries `shrink-0
+  whitespace-nowrap` (min-content width 99px at any viewport) and muted
+  colours — zinc-900/50 ground, zinc-700 border, `text-amber-200/70` (amber
+  at 70% alpha) instead of `text-amber-300`; amber returns only on hover
+  (`hover:bg-amber-500/15 hover:border-amber-500/40`). (c) the **Export**
+  button moved from the controls row to the top row, immediately left of the
+  ℹ About button (tree / edit-list / export / about). The pre-existing
+  ≤390px horizontal overflow of the controls row is unchanged (still tracked
+  under the mobile umbrella, issue #19) — the squeezed Fix-images button was
+  a symptom of it, not a cause. Regression:
+  `tests/thumb-recovery.spec.js` gains 2 assertions — the button must stay
+  one line (svg/label same row) with `white-space: nowrap` at a squeezed
+  1024px viewport (22 assertions total).
+
+- **2026-10-02 — case-faithful, wrapped tile titles (v1.23).** DET
   tiles rendered filenames ALL CAPS (`uppercase tracking-widest`) and truncated
   to one line (`truncate`), so long names were cut off and case was lost. The
   h3 now renders mixed case and wraps: `leading-snug break-words` replaces
@@ -57,7 +77,7 @@ Live at **https://commons-vibe.toolforge.org/**.
   the browser's own print-to-PDF is the renderer (CSP-safe, zero bytes).
   Verified end to end by rendering a 48-tile sample:
   `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored artifact).
-  Regression: `tests/export.spec.js` (21 assertions) — empty-feed disabled
+  Regression: `tests/export.spec.js` (20 assertions) — empty-feed disabled
   states, per-format previews (CSV header/Files, TXT bare list, JSON envelope
   parses, wiki gallery tags), limit slicing, download file naming, clips-scope
   fetch. The export dialog is intentionally **not** in the URL contract:
@@ -349,7 +369,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (21 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (20 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -493,7 +513,8 @@ python3 -m http.server 8123        # any static server works; no build step
     Also: a bare `?cat=Chop Suey` (no `Category:` prefix) renders the painting
     instead of an empty feed, and no tile's `srcset` ever contains a non-/thumb/
     URL or a bucket wider than 1280px. Automated:
-    `tests/thumb-recovery.spec.js` (19 assertions).
+    `tests/thumb-recovery.spec.js` (22 assertions — includes the v1.24
+    one-line/nowrap geometry guard on the Fix images button).
 25. Cross-engine + gate (v1.17). Verify `tests/run.sh` can actually FAIL: break one
     assertion on purpose (or `run_spec /tmp/zz-fail.spec.js "x"` with a throwing
     spec) and confirm it exits non-zero with the `FAIL` line printed. Then run
@@ -508,7 +529,7 @@ python3 -m http.server 8123        # any static server works; no build step
     clip order; unclipping there drops the tile in place and emptying the feed
     shows End of Collection; reloading keeps the collection (localStorage);
     `?clips=1` boots straight into the feed. Automated: `tests/clips.spec.js`
-    (17 assertions).
+    (19 assertions).
 27. Lite mode (v1.20/v1.21): the ⚡ Lite chip (next to S/M/L) loads 1×
     thumbnails — base thumbs drop to the smallest ladder bucket ≥ slot width
     (330px at M density, 250px at S) and srcset carries no retina (2×)
@@ -528,7 +549,7 @@ python3 -m http.server 8123        # any static server works; no build step
     `#print-header` label). Quick metadata only (whatever the tiles carry) —
     artist/license enrichment is issue #30 phase 2; the JSON `files[]` shape is
     the seed for the phase-4 shareable-session re-import.
-    Automated: `tests/export.spec.js` (21 assertions). Sample render artifact:
+    Automated: `tests/export.spec.js` (20 assertions). Sample render artifact:
     `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored).
 29. Title treatment (v1.23): DET tile titles are **case-faithful** (the CSS
     `uppercase`/`tracking-widest` are gone) and **wrap to the full filename**

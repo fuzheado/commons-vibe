@@ -10,7 +10,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Visually examine a specific category** by selecting a category from the pull-down menu, and "Minimal" mode to isolate just the images.
 * **Use shuffle mode on a large category** with the "Detailed" setting to quickly explore the variety of a category.
 * **Dial the tile density** with the S/M/L control — from a 6-column wall of thumbnails down to big single-column previews — and the grid reflows instantly.
-* **⚡ Lite mode** — the speed-over-quality toggle: 1× thumbnails with no retina variants (4–7× less image data on hiDPI screens), full resolution always preserved in the viewer. Toggle it in the header or via `?lite=1`.
+* **⚡ Lite mode** — the speed-over-quality toggle: 1× thumbnails with no retina variants (~7× less image data on hiDPI screens), full resolution always preserved in the viewer. Toggle it in the header or via `?lite=1`.
 * **Jump to different categories** by selecting the image's "tag" button to bring up Commons categories you can click on, visible or hidden.
 * **Browse the category tree** via the sitemap button: see subcategories to a chosen depth (1–5) with file counts, click any node to explore it. The chips row above the grid shows the current category's parents and subcategories. Big trees load 500 at a time with a "Load more" extension — cyclic cross-listings are deduped.
 * **Shuffle an entire subtree** with Deep mode: the feed samples from the category *and all its subcategories*. The sampler walks the tree client-side (cached), picks a subcategory weighted by file count, and draws exact random files from it — full-depth coverage without CirrusSearch's truncating `deepcategory` envelope.
@@ -20,6 +20,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Spin 3D models in place** — STL tiles render an interactive WebGL viewer on hover: drag to spin (yaw/pitch), wheel to zoom, auto-rotating until you grab it. Posters stay until you hover, bytes load on intent, and files too big to spin (40MB+) keep their thumbnail.
 * **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed.
 * **Clip images into a personal collection** — hit the bookmark button on any tile (or "✂ Clip this" in the viewer); your collection lives in the browser and browses as its own feed via the header chip or `?clips=1`.
+* **Export or print a feed** — the download button in the header exports the current feed (or your clips) as JSON, CSV, a plain `File:` list, or wiki `<gallery>` markup, and the PDF/Print button renders the feed as a light 3-column contact sheet through your browser's print dialog.
 
 ## **A running version can be found at: https://commons-vibe.toolforge.org/**
 
@@ -56,7 +57,7 @@ CommonsVibe supports distinct ways to interact with media:
 1.  **Alphabetical Mode:** The classic organized approach. Browse through a category's contents in order, with 12 tiles loaded at a time as you scroll. (When a media-type filter is active in this mode and the type is sparse — e.g. 3D files — matches are drawn directly so tiles appear immediately rather than after a long alphabetical crawl.)
 2.  **Shuffle Mode:** For true serendipity. Using Wikimedia's *CirrusSearch*, this mode pulls 12 random tiles at a time from never-repeating draws, creating a unique, never-ending discovery session. **Deep mode** extends this across a whole subtree: each batch draws from several distinct subcategories (weighted by size), so no single subject floods the screen. The media-type filter applies server-side here.
 
-Both modes work in **Detailed** (filename + 3-line description) and **Minimal** (edge-to-edge images, metadata on hover) views.
+Both modes work in **Detailed** (full case-faithful filename + 3-line description — long names wrap instead of truncating) and **Minimal** (edge-to-edge images, metadata on hover) views.
 
 ---
 
