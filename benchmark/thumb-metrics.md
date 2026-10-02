@@ -1,8 +1,10 @@
 # Thumbnail Metrics & Benchmarks
 
 Measured 2026-09-02/03. Sample image: `File:Dülmen, Umland, Sonnenaufgang -- 2012 -- 8084.jpg`
-(3456×5184 portrait JPEG, featured picture). Live page: `?cat=Featured pictures of birds`, M density
-(4 columns @1280px viewport ≈ **284px slots**), DPR 1 (headless).
+(3456×5184 portrait JPEG, featured picture). Live page: `?cat=Quality images of China`, M density
+(4 columns @1280px viewport ≈ **284px slots**), DPR 1 (headless). (Swapped from the
+since-reorganised `Featured pictures of birds` — the 4-column/284px-slot geometry is
+category-independent.)
 
 ## Discovery: the thumbnail infrastructure migrated + bucket-quantizes
 

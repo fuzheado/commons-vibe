@@ -30,7 +30,7 @@ const TRUTH_DEPTH = 8;
 const TRUTH_MAX_NODES = 600;
 
 const rootArg = (process.argv[2] && !process.argv[2].startsWith("--"))
-  ? process.argv[2] : "Category:Featured pictures of birds";
+  ? process.argv[2] : "Category:Quality images of China";
 const LIVE = process.argv.includes("--live");
 
 const norm = (s) => String(s).replace(/_/g, " ").toLowerCase();
