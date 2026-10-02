@@ -9,7 +9,24 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.25 deployed and verified live; v1.15–v1.24 deployed)
+## Current state (updated 2026-10-02, v1.26 shipped with this commit; v1.15–v1.25 deployed)
+
+- **2026-10-02 — deep banner shows the subtree file count (v1.26, issue #31(a)).**
+  The 🌳 deep banner now ends with `· ≈136,900 files` (or `· ≈16 images` when a
+  media-type filter is active, `· no videos` for a zero). Source: ONE
+  `list=search` call with `deepcategory:"<cat>"` + the app's `TYPE_TERM`,
+  reading `searchinfo.totalhits` — deduplicated across the subtree. The client
+  walker's per-node counts are deliberately NOT used: summing them double-counts
+  cross-listed files (Quality images of China: 2,213 memberships over 55 nodes
+  vs 1,388 unique, measured 2026-10-02). It is an estimate at large counts and
+  inherits the ~depth-5 cap, so the UI says "≈". Cached 1h; a `detach: true`
+  option on `api()` keeps the request out of the feed's abort controller (the
+  boot `resetAndFetch` was aborting it — the first implementation rendered
+  nothing for exactly that reason); a seq guard drops stale responses when the
+  category/type changes mid-flight; failures stay silent in the console.
+  Regression: `tests/deep-banner.spec.js` (10 assertions — hidden outside deep
+  mode, count equals the live API totalhits, per-type qualification, zero case,
+  cleared on deep-off).
 
 - **2026-10-02 — stale-page resilience: no more init hangs on cached HTML
   (v1.25).** Reported: the new build worked in a fresh profile but hung on an
@@ -390,7 +407,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (10 assertions, v1.26 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, zero case; issue #31a), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -588,6 +605,13 @@ python3 -m http.server 8123        # any static server works; no build step
     **Export** moved to the top row, immediately left of the ℹ About button.
     Automated: `tests/thumb-recovery.spec.js` (2 new assertions — one-line
     and `white-space: nowrap` at a squeezed 1024px viewport).
+31. Deep subtree count (v1.26, issue #31(a)): with deep mode on, the banner
+    shows `· ≈N files` (per media type: `· ≈N images`, `· no videos`) from one
+    `deepcategory` search call's `searchinfo.totalhits` — deduplicated, cached
+    1h, hidden on failure. `api()` gains a `detach: true` option so this
+    request survives feed aborts. Automated: `tests/deep-banner.spec.js`
+    (10 assertions). Issue #31(b) — ordered "browse entire subtree" — still
+    open.
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 

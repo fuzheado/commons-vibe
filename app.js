@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.25 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.26 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.25"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.26"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -195,20 +195,23 @@ function apiThrottle() {
   return slot;
 }
 
-async function api(params, { ttl = 0 } = {}) {
+async function api(params, { ttl = 0, detach = false } = {}) {
   params = { ...params, format: "json", formatversion: "2", origin: "*" };
   const url = API_BASE + "?" + new URLSearchParams(params).toString();
   if (ttl > 0) {
     const hit = cacheGet(url, ttl);
     if (hit) return hit;
   }
-  const signal = state.abort.signal;
+  // detach (v1.26): some requests (e.g. the deep-banner count) belong to the
+  // page state, not the feed batch — they must survive the resetAndFetch that
+  // aborts in-flight feed requests during boot/navigation.
+  const signal = detach ? null : state.abort.signal;
   for (let attempt = 0; attempt < 4; attempt++) {
-    if (signal.aborted) throw new DOMException("Aborted", "AbortError");
+    if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
     try {
       await apiThrottle();
-      if (signal.aborted) throw new DOMException("Aborted", "AbortError");
-      const resp = await fetch(url, { signal });
+      if (signal && signal.aborted) throw new DOMException("Aborted", "AbortError");
+      const resp = await fetch(url, signal ? { signal } : undefined);
       if (resp.status === 429 || resp.status >= 500) {
         const retryAfter = parseInt(resp.headers.get("retry-after") || "0", 10);
         await sleep(retryAfter ? retryAfter * 1000 : Math.min(1000 * 2 ** attempt, 8000));
@@ -220,7 +223,7 @@ async function api(params, { ttl = 0 } = {}) {
       if (ttl > 0) cachePut(url, data);
       return data;
     } catch (e) {
-      if (e.name === "AbortError" || signal.aborted) throw e;
+      if (e.name === "AbortError" || (signal && signal.aborted)) throw e;
       if (attempt === 3) throw e;
       console.warn("api retry", attempt + 1, e.message);
       await sleep(1000 * 2 ** attempt);
@@ -2495,14 +2498,57 @@ function handleTreeDeep() {
 
 // One place that reflects deep mode in the UI: the Deep chip in the sort pill
 // and the explainer banner above the grid.
+const setText = (id, value) => { const el = $(id); if (el) el.textContent = value; };
+
+/* Deep-subtree count (v1.26, issue #31): CirrusSearch's deepcategory reports
+ * searchinfo.totalhits for the whole subtree in ONE call, deduplicated. The
+ * client walker's per-node counts are NOT that number — summing them
+ * double-counts cross-listed files (Quality images of China: 2,213
+ * memberships over 55 nodes vs 1,388 unique files, measured 2026-10-02).
+ * totalhits is an estimate at large counts and inherits the ~depth-5 cap, so
+ * the UI labels it "≈". Cached 1h (the index moves slowly), hidden on failure. */
+const TYPE_COUNT_LABEL = { all: "files", image: "images", video: "videos", audio: "audio files", "3d": "3D models" };
+let deepCountKey = null; // category|type of the number currently shown — skips refetch
+let deepCountSeq = 0;    // stale-response guard across rapid changes
+async function refreshDeepCount() {
+  if (!state.deepMode) return;
+  const key = `${state.currentCategory}|${state.type}`;
+  if (key === deepCountKey) return;
+  const seq = ++deepCountSeq;
+  deepCountKey = key;
+  setText("deep-banner-count", "");
+  try {
+    const cat = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
+    const data = await api({
+      action: "query",
+      list: "search",
+      srsearch: `deepcategory:"${cat}"${typeSearchTerm()}`,
+      srnamespace: "6",
+      srlimit: "1",
+    }, { ttl: 3600e3, detach: true });
+    const total = data.query && data.query.searchinfo && data.query.searchinfo.totalhits;
+    if (seq !== deepCountSeq || !state.deepMode || typeof total !== "number") return;
+    const label = TYPE_COUNT_LABEL[state.type] || "files";
+    setText("deep-banner-count", total === 0 ? ` · no ${label}` : ` · ≈${total.toLocaleString()} ${label}`);
+  } catch (e) {
+    if (seq === deepCountSeq) deepCountKey = null; // let the next sync retry
+    console.warn("deep count failed:", e);
+  }
+}
+
 function syncDeepUI() {
-  $("deep-chip").classList.toggle("hidden", !state.deepMode);
+  const chip = $("deep-chip");
+  if (chip) chip.classList.toggle("hidden", !state.deepMode);
   const banner = $("deep-banner");
+  if (!banner) return;
   if (state.deepMode) {
-    $("deep-banner-cat").textContent = catDisplayName(state.currentCategory);
+    setText("deep-banner-cat", catDisplayName(state.currentCategory));
     banner.classList.remove("hidden");
+    refreshDeepCount();
   } else {
     banner.classList.add("hidden");
+    setText("deep-banner-count", "");
+    deepCountKey = null;
   }
 }
 
