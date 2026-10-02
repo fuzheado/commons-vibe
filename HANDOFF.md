@@ -9,7 +9,26 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.22 shipped with this commit; v1.15–v1.21 deployed)
+## Current state (updated 2026-10-02, v1.23 shipped with this commit; v1.15–v1.22 deployed)
+
+- **2026-10-02 — case-faithful, wrapped tile titles (v1.23, this commit).** DET
+  tiles rendered filenames ALL CAPS (`uppercase tracking-widest`) and truncated
+  to one line (`truncate`), so long names were cut off and case was lost. The
+  h3 now renders mixed case and wraps: `leading-snug break-words` replaces
+  `uppercase tracking-widest truncate`. Dropping caps + tracking also frees
+  ~30% of the line width — most names now fit fully on one line ("20231126
+  Former Hankou Railway Station.jpg" used to render as "20231126 FORMER HANKOU
+  RAILWAY ST…"). Measured on real data: 783-file WLM China sample, max title
+  81 chars → 2 lines; Louvre worst case (138-char König title) → 3 lines,
+  +14px on a 485px card (+2.9%). Masonry is unaffected by construction —
+  `placeCard()` measures `card.offsetHeight` per card and the media box is
+  aspect-ratio-driven, so title-height variance is absorbed exactly like
+  image-height variance. No new Tailwind pinning needed: `break-words` and
+  `leading-snug` already occur in `index.html`, so the JIT compiles them at
+  first paint (the v1.21 trap only hit utilities exclusive to app-generated
+  HTML). The print/PDF sheet inherits the change — full mixed-case names there.
+  Regression: `tests/title-wrap.spec.js` (10 assertions — computed-style
+  contract + a real 138-char title wraps to 3 lines with no overflow).
 
 - **2026-10-02 — export dialog (v1.22, issue #30 phase 1, this commit).** New
   **Export** button in the header (next to ⚡ Lite) opens a dialog modelled on the
@@ -330,7 +349,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (21 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (19 assertions, v1.16 — srcset filtering + in-place recovery + dead-state button + bare `?cat=`; injects failures by aborting tile requests), `clips.spec.js` (17 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (15 assertions, v1.20 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (21 assertions, v1.22 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -511,6 +530,14 @@ python3 -m http.server 8123        # any static server works; no build step
     the seed for the phase-4 shareable-session re-import.
     Automated: `tests/export.spec.js` (21 assertions). Sample render artifact:
     `cache/export-sample/commonsvibe-print-sample.pdf` (gitignored).
+29. Title treatment (v1.23): DET tile titles are **case-faithful** (the CSS
+    `uppercase`/`tracking-widest` are gone) and **wrap to the full filename**
+    (`leading-snug break-words`; the h3's `title` tooltip keeps the full name
+    too). Worst case measured at design time: a real 138-char Louvre title →
+    3 lines, +14px on a 485px card (+2.9%); masonry absorbs it (placement uses
+    measured `offsetHeight`). The print/PDF sheet inherits it — full names
+    instead of CAPS truncation. Automated: `tests/title-wrap.spec.js`
+    (10 assertions — computed-style contract + real-title wrap/no-overflow).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 

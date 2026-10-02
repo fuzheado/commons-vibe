@@ -38,6 +38,7 @@ run_spec tests/thumb-recovery.spec.js  "thumb-recovery spec (v1.16)"            
 run_spec tests/clips.spec.js           "clips spec (v1.18 — personal collection)"    || exit 1
 run_spec tests/lite.spec.js            "lite spec (v1.20 — speed/quality toggle)"    || exit 1
 run_spec tests/export.spec.js          "export spec (v1.22 — export dialog)"         || exit 1
+run_spec tests/title-wrap.spec.js      "title-wrap spec (v1.23 — case-faithful names)" || exit 1
 run_spec tests/stl.spec.js             "STL spec (3D viewer)"                         || exit 1
 run_spec tests/engine-quirks.spec.js   "engine-quirks spec (cross-engine facts)"      || exit 1
 
