@@ -80,9 +80,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   the three feed calls request `iiurlwidth=feedThumbWidth()` — the smallest
   thumbnail-ladder bucket ≥ the slot width (250/330px in S/M densities, 960/1280
   in L so nothing is upscaled) — and `srcsetFor` never declares retina (2×)
-  candidates. Measured gain (3-file sample, Featured pictures of birds): retina
-  default ~284KB/tile → lite 330px ~13–43KB/tile ≈ **4–7× less image data**;
-  DPR-1 users ~50% (92→43KB). The **viewer always stays high-res** (1600 request
+  candidates. Measured gain (3-file sample, Category:Quality images of China,
+  re-measured 2026-10-02): retina default ~213KB/tile → lite 330px
+  ~18–41KB/tile ≈ **7× less image data**; DPR-1 users ~55% less (64→29KB). The **viewer always stays high-res** (1600 request
   → 1920px bucket) — skim in lite, inspect in full. Precedence: URL param
   `lite=1`/`lite=0` > localStorage `vibe_lite` > off; the toggle persists per
   device and `lite=1` in a shared URL carries the choice to the recipient.
@@ -950,7 +950,10 @@ existing exponential-backoff retry absorbs.
 
 Ground truth: full enumeration of Category:Featured pictures of birds (401
 categories to natural exhaustion at depth 4, 1,792 distinct files, every file's
-membership listed). Run: `node benchmark/deep-shuffle.js [Category:...] [--live]`
+membership listed) — a 2026-09 run. **Note (2026-10-02):** Commons housekeeping
+has since reorganised that category (now 3 direct files + 34 subcategories), so
+use a different root for a fresh walk — e.g. `Category:Quality images of China`
+(180 direct files + 10 subcategories). Run: `node benchmark/deep-shuffle.js [Category:...] [--live]`
 (cache in `cache/bench/`, ~5 min cold at 300ms pacing).
 
 - **Coverage:** the sampler envelope sees **100%** of the tree's files at the
@@ -992,6 +995,12 @@ fine for a snapshot feature, wrong for a live shuffle.
    truncated, not just emptied; shuffle degrades to tiny batches from that
    category until the index heals. Diagnose with a direct search-API probe
    (±`srsort=random`, several categories) before touching app code.
+   **Follow-up (2026-10-02):** that category now holds exactly 3 direct files
+   (`prop=categoryinfo`: 3 files, 34 subcategories) and a live
+   `generator=categorymembers` call returns 3 with no continue — so the
+   "3 results" was most likely the true member count mid-reorganisation, not
+   index truncation. Index truncation may still occur; check a category's
+   direct-file count before blaming the index.
 
 1. ~~**Server git checkout is stale**~~ — **Resolved 2026-10-01:** the orphaned
    `public_html/.git` checkout (web-readable `/.git/config`, `/HEAD`, `/index`) and
