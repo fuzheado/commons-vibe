@@ -102,6 +102,74 @@ async page => {
   t("viewer in lite: NOT 330px (stays 1920px bucket)", vsrc.includes("/1920px-") && !vsrc.includes("/330px-"), vsrc.slice(-70));
   await page.keyboard.press("Escape");
 
+  // ── 7. Toggle in shuffle mode preserves the drawn set + order ─────────
+  // The v1.20 toggle ran resetAndFetch — every lite flip reshuffled the feed.
+  // It must redraw the SAME tiles in the SAME order instead (in-place redraw).
+  // Quiescence first: captures are only valid when no fill-up batch is in
+  // flight or landing (a sentinel batch between samples is a false diff).
+  // Poll until the tile count stops changing.
+  const settleFeed = async () => {
+    await page.waitForFunction(
+      () => document.getElementById("loading-spinner").classList.contains("hidden"),
+      null,
+      { timeout: 30000 },
+    ).catch(() => {});
+    let prev = -1;
+    for (let i = 0; i < 20; i++) {
+      const n = await page.evaluate(() => document.querySelectorAll(".group").length);
+      if (n === prev && n > 0) return n;
+      prev = n;
+      await page.waitForTimeout(700);
+    }
+    return prev;
+  };
+  await page.evaluate(() => localStorage.setItem("vibe_lite", "0")); // start full
+  await page.goto(BASE + "/?cat=Category%3AImages%2520from%2520Wiki%2520Loves%2520Monuments%25202026%2520in%2520China&sort=shuffle".replaceAll("%2520", "%20"), { waitUntil: "domcontentloaded" });
+  // Visual order is what the user perceives: masonry scatters fetch order
+  // across columns, so DOM/document order is NOT the on-screen order. Sort by
+  // (y, x) and compare THAT across the toggle.
+  const visualOrder = () => page.evaluate(() =>
+    [...document.querySelectorAll(".group")].map((c) => {
+      const r = c.getBoundingClientRect();
+      return { t: c.dataset.file, x: Math.round(r.left), y: Math.round(r.top + window.scrollY) };
+    }).sort((a, b) => a.y - b.y || a.x - b.x).map((o) => o.t));
+  await page.waitForFunction(() => document.querySelectorAll(".group .media-container img").length >= 12, null, { timeout: 60000 });
+  const nBefore = await settleFeed();
+  await page.waitForTimeout(1500); // let images paint so positions are final
+  await page.evaluate(() => { window.__cvNoReload = true; });
+  const orderBefore = await visualOrder();
+  t("shuffle: 12+ tiles drawn", orderBefore.length >= 12 && orderBefore.length === nBefore, `${orderBefore.length} tiles (stable at ${nBefore})`);
+
+  await page.locator("#lite-btn").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".group .media-container img").length > 0 && [...document.querySelectorAll(".group .media-container img")].every((i) => i.src.includes("/330px-")),
+    null,
+    { timeout: 30000 },
+  );
+  await settleFeed();
+  await page.waitForTimeout(1500);
+  const orderLite = await visualOrder();
+  const diffLite = orderBefore.findIndex((t, i) => t !== orderLite[i]);
+  t("shuffle→lite: SAME tiles, SAME visual order", diffLite === -1,
+    `first diff at ${diffLite}: ${JSON.stringify((orderBefore[diffLite] || "").slice(5, 40))} → ${JSON.stringify((orderLite[diffLite] || "").slice(5, 40))} (${orderLite.length} vs ${orderBefore.length} tiles)`);
+  t("shuffle→lite: thumbs are 330px", (await page.evaluate(() => document.querySelector(".group .media-container img").src)).includes("/330px-"));
+  t("shuffle→lite: no page reload", await page.evaluate(() => window.__cvNoReload === true));
+  t("shuffle→lite: URL carries lite=1", page.url().includes("lite=1"), page.url());
+
+  await page.locator("#lite-btn").click();
+  await page.waitForFunction(
+    () => document.querySelectorAll(".group .media-container img").length > 0 && [...document.querySelectorAll(".group .media-container img")].every((i) => i.src.includes("/500px-")),
+    null,
+    { timeout: 30000 },
+  );
+  await settleFeed();
+  await page.waitForTimeout(1500);
+  const orderFull = await visualOrder();
+  const diffFull = orderBefore.findIndex((t, i) => t !== orderFull[i]);
+  t("lite→shuffle: SAME tiles, SAME visual order again", diffFull === -1,
+    `first diff at ${diffFull}: ${JSON.stringify((orderBefore[diffFull] || "").slice(5, 40))} → ${JSON.stringify((orderFull[diffFull] || "").slice(5, 40))} (${orderFull.length} vs ${orderBefore.length} tiles)`);
+  t("lite→shuffle: retina candidate returns", await page.evaluate(() => /960w/.test(document.querySelector(".group .media-container img").getAttribute("srcset") || "")));
+
   // Cleanup so other specs start full-quality.
   await page.evaluate(() => localStorage.removeItem("vibe_lite"));
 

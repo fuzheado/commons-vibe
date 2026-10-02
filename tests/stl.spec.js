@@ -119,20 +119,34 @@ async page => {
   });
 
   await step("5b. vertical drag pitches", async () => {
-    const c = await center(page.locator("[data-stl]").first());
-    const c1 = await cam();
+    // Drag distance must be derived from the ACTUAL tile: the first STL tile
+    // in alpha order changes as files are added to the live category (it was
+    // a portrait poster when this spec was written; a 16:9 landscape poster
+    // is only ~160px tall, so a fixed +90px drag exited the tile mid-drag →
+    // pointerleave disposed the rig and the camera read null).
+    const loc = page.locator("[data-stl]").first();
+    const c = await center(loc);
+    const dy = Math.max(30, Math.round(c.b.height * 0.3));
+    // Re-establish the rig if the churn around the previous step disposed it.
     await page.mouse.move(c.x, c.y, { steps: 2 });
+    await page.waitForFunction(() => (window.__cvStl?.registry?.size || 0) > 0, null, { timeout: 15000 });
     await page.mouse.down();
-    await page.mouse.move(c.x, c.y + 90, { steps: 10 });
+    await page.mouse.up(); // stop auto-rotate
+    await page.waitForTimeout(300);
+    const c1 = await cam();
+    await page.mouse.down();
+    await page.mouse.move(c.x, c.y + dy, { steps: 10 });
     await page.mouse.up();
     await page.waitForTimeout(200);
     const c2 = await cam();
-    t("camera moved vertically", c1.y !== c2.y || c1.z !== c2.z, `${JSON.stringify(c1)} → ${JSON.stringify(c2)}`);
+    t("camera moved vertically", c1 && c2 && (c1.y !== c2.y || c1.z !== c2.z), `${JSON.stringify(c1)} → ${JSON.stringify(c2)}`);
   });
 
   await step("5c. wheel zooms", async () => {
-    const c = await center(page.locator("[data-stl]").first());
+    const loc = page.locator("[data-stl]").first();
+    const c = await center(loc);
     await page.mouse.move(c.x, c.y, { steps: 2 });
+    await page.waitForFunction(() => (window.__cvStl?.registry?.size || 0) > 0, null, { timeout: 15000 });
     const d1 = await dist();
     await page.mouse.wheel(0, -500);
     await page.waitForTimeout(400);

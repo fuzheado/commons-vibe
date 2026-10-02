@@ -1,3 +1,43 @@
+/* Reserve the scrollbar gutter permanently: without it the viewport width
+   changes when the scrollbar appears (boot starts empty, content grows past
+   the fold mid-placement), so masonry column widths — and therefore card
+   heights — differed between the first placement and any later reflow (lite
+   toggle, size toggle) and tiles shifted columns. With a stable gutter the
+   placement math is identical every time (v1.21). */
+html {
+    scrollbar-gutter: stable;
+}
+
+/* Height-critical utilities, pinned so the FIRST masonry placement is correct.
+   These appear only in app-generated HTML (buildCard); the Tailwind JIT only
+   compiles them after its MutationObserver fires — asynchronously AFTER the
+   batch's synchronous placeCard loop reads offsetHeight. Measured 2026-10-02:
+   unclamped descriptions made first-batch cards 10–48px taller, so every cold
+   load's column assignment was subtly wrong (and any reflow — lite toggle,
+   size change — reshuffled the layout). Same values as Tailwind generates;
+   when the JIT catches up it injects identical rules, so nothing changes
+   visually. */
+.line-clamp-3 {
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+}
+.truncate {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+.text-\[11px\] {
+    font-size: 11px;
+}
+.leading-relaxed {
+    line-height: 1.625;
+}
+.gap-y-2 {
+    row-gap: 0.5rem;
+}
+
 .masonry-col {
     flex: 1 1 0%;
     min-width: 0;

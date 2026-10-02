@@ -55,7 +55,9 @@ async page => {
 
   // ---------- 1. static guards on the srcset filter (no network) ----------
   await step("unit: srcset filter", async () => {
-    await page.goto(SMALL, { waitUntil: "domcontentloaded", timeout: 60000 });
+    // The filter's behavior is mode-dependent (lite drops 2× candidates), so
+    // pin the mode explicitly: full first, then lite.
+    await page.goto(BASE + "/?cat=Category%3AChop%20Suey&lite=0", { waitUntil: "domcontentloaded", timeout: 60000 });
     await page.waitForFunction(() => !!window.__cvThumb, null, { timeout: 30000 });
     const u = await page.evaluate(() => {
       const { srcsetFor, cleanThumbCandidate } = window.__cvThumb;
@@ -79,6 +81,20 @@ async page => {
       u.withOriginal.srcset.slice(0, 90));
     t("unit: 1x thumbnail exposed for the fallback ladder", /\/960px-/.test(u.withOriginal.base || ""), u.withOriginal.base);
     t("unit: good bucket kept as 2x", u.withBucket.srcset.split(",").length === 2, u.withBucket.srcset.split(",").length + " candidate(s)");
+    const uLite = await page.evaluate(async () => {
+      // Flip to lite via the app's own toggle, then re-run the same cases.
+      localStorage.setItem("vibe_lite", "1");
+      location.search += "&lite=1";
+    });
+    await page.goto(BASE + "/?cat=Category%3AChop%20Suey&lite=1", { waitUntil: "domcontentloaded", timeout: 60000 });
+    const lit = await page.evaluate(() => {
+      const { srcsetFor } = window.__cvThumb;
+      const THUMB960 = "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/98/Example.jpg/960px-Example.jpg";
+      const THUMB1280 = "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/98/Example.jpg/1280px-Example.jpg";
+      return { withBucket: srcsetFor(THUMB960, 300, { 2: THUMB1280 }) };
+    });
+    t("unit (lite): 2x candidate dropped", lit.withBucket.srcset.split(",").length === 1, lit.withBucket.srcset.slice(0, 90));
+    await page.evaluate(() => localStorage.removeItem("vibe_lite"));
     t("unit: duplicate bucket not repeated", u.singleBucketSrcset.split(",").length === 1);
   });
 

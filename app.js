@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.20 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.21 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.20"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.21"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -558,7 +558,7 @@ async function listBatch() {
     prop: "imageinfo|videoinfo|categories",
     clprop: "hidden",
     cllimit: "max",
-    iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiprop: "url|size|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
     iiurlwidth: feedThumbWidth(),
@@ -896,7 +896,7 @@ async function batchInfo(titles) {
     prop: "imageinfo|videoinfo|categories",
     clprop: "hidden",
     cllimit: "max",
-    iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiprop: "url|size|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
     iiurlwidth: feedThumbWidth(),
@@ -938,7 +938,7 @@ async function fetchBatch() {
     prop: "imageinfo|videoinfo|categories",
     clprop: "hidden",
     cllimit: "max",
-    iiprop: "url|extmetadata|derivatives|mediatype|mime",
+    iiprop: "url|size|extmetadata|derivatives|mediatype|mime",
     iiextmetadatafilter: "ImageDescription|ObjectName",
     viprop: "url|derivatives",
     iiurlwidth: feedThumbWidth(),
@@ -1102,7 +1102,58 @@ function toggleLite() {
   }
   syncLiteUI();
   updateURL(); // lite=1 written while on; omitted when off (per-device pref)
-  resetAndFetch(); // new iiurlwidth = new cache keys = full redraw
+  redrawFeedInPlace().then((kept) => {
+    if (!kept) resetAndFetch(); // nothing on screen (or redraw failed) — full reset is fine
+  });
+}
+
+// Re-fetch imageinfo for exactly the tiles on screen, at the new thumbnail
+// width, and rebuild them in the SAME order — a lite toggle must not change
+// WHAT is shown, only how sharply (v1.20 follow-up: resetAndFetch used to
+// reshuffle the whole feed, throwing away the drawn set in shuffle mode).
+// Deliberately NOT reset here: seenTitles/continueToken/hasReachedEnd/
+// deepWalk/list cursor — every mode keeps its position; only the tiles'
+// image URLs change. Falls back to false when there is nothing to redraw.
+async function redrawFeedInPlace() {
+  const cards = [...state.items];
+  const titles = cards.map((c) => c.dataset.file).filter(Boolean);
+  if (!titles.length) return false;
+  const reqId = ++state.requestId; // stale-response guard (another reset supersedes us)
+  state.abort.abort();
+  state.abort = new AbortController();
+  prefetchPromise = null; // in-flight prefetch belongs to the old width
+  state.isLoading = true;
+  try {
+    const pages = [];
+    for (let i = 0; i < titles.length; i += 50) {
+      const data = await api({
+        action: "query",
+        titles: titles.slice(i, i + 50).join("|"),
+        prop: "imageinfo|videoinfo|categories",
+        clprop: "hidden",
+        cllimit: "max",
+        iiprop: "url|size|extmetadata|derivatives|mediatype|mime",
+        iiextmetadatafilter: "ImageDescription|ObjectName",
+        viprop: "url|derivatives",
+        iiurlwidth: feedThumbWidth(),
+      }, { ttl: 0 }); // always fresh — the point is new-width URLs
+      if (reqId !== state.requestId) return true; // superseded — bail quietly
+      pages.push(...((data.query && data.query.pages) || []));
+    }
+    // pageid-ordered response → restore the exact on-screen order by title.
+    const byTitle = new Map(pages.filter((p) => !p.missing).map((p) => [normCat(p.title), p]));
+    const ordered = titles.map((t) => byTitle.get(normCat(t))).filter(Boolean);
+    $("masonry-container").innerHTML = "";
+    state.items = [];
+    ensureColumns(currentCols());
+    renderPages(ordered);
+    return true;
+  } catch (e) {
+    console.warn("lite redraw failed — keeping current tiles:", e);
+    return state.items.length > 0; // old tiles are still valid; next batches go lite
+  } finally {
+    state.isLoading = false;
+  }
 }
 
 /* ---------------- broken-thumbnail recovery ---------------- */
@@ -1306,6 +1357,7 @@ function installThumbRecovery() {
   $("fix-thumbs-btn")?.addEventListener("click", fixBrokenThumbs);
   // Test hook for tests/thumb-recovery.spec.js — the app never reads it.
   window.__cvThumb = { srcsetFor, cleanThumbCandidate, thumbBucketWidth, deadImages: thumbDeadImages, retryMax: THUMB_RETRY_MAX };
+  window.__cvState = state; // spec/debug hook — the app never reads it back
 }
 
 /* ---------------- 3D STL viewer (hover-to-spin) ---------------- */
@@ -1670,8 +1722,13 @@ function buildCard(page) {
   }
 
   const thumbUrl = cleanUrl(info.thumburl || "");
-  const tw = info.thumbwidth || 16;
-  const th = info.thumbheight || 9;
+  // Original dimensions for the aspect-ratio box (NOT the thumb dims): the API
+  // rounds thumb height per requested width (480×360 vs 330×248), so lite and
+  // full modes would get slightly different aspect ratios and the masonry
+  // placement would drift on a lite toggle — the original dims are identical
+  // in every mode (v1.21).
+  const tw = info.width || info.thumbwidth || 16;
+  const th = info.height || info.thumbheight || 9;
   const { srcset, sizes, base: thumbBase } = srcsetFor(thumbUrl, slotWidthPx(), info.responsiveUrls);
   const srcsetAttr = srcset ? `srcset="${esc(srcset)}" sizes="${esc(sizes)}" data-src-one="${esc(thumbBase)}"` : `data-src-one="${esc(thumbBase)}"`;
 

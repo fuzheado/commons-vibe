@@ -9,7 +9,36 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-02, v1.20 in review; v1.15–v1.19 deployed)
+## Current state (updated 2026-10-02, v1.21 in review; v1.15–v1.20 deployed)
+
+- **2026-10-02 — lite toggle preserves the feed (v1.21, this PR).** Reported:
+  toggling lite in shuffle mode reshuffled everything. Root cause chain:
+  (a) `toggleLite` called `resetAndFetch`, which redraws from fresh random
+  draws — replaced with `redrawFeedInPlace()`: imageinfo for exactly the
+  on-screen titles (batched 50, `ttl: 0`, new width), rebuilt in the same
+  order; `seenTitles`/`continueToken`/`hasReachedEnd`/`deepWalk`/list cursor
+  all preserved, so every mode keeps its position and the drawn set.
+  (b) Even with (a), the masonry placement drifted across the toggle — two
+  real bugs found by a MutationObserver measuring placement-time geometry:
+  **aspect-ratio** used the API's per-width thumb dims (480×360 vs 330×248 —
+  rounded differently per requested width) → now uses the ORIGINAL file dims
+  (`iiprop` gains `size`), identical in every mode; and **Tailwind JIT
+  latency**: `line-clamp-3`/`truncate`/`text-[11px]`/`leading-relaxed`/
+  `gap-y-2` exist only in app-generated HTML, so batch 1 was placed before
+  the JIT compiled them — unclamped descriptions made cards 10–48px taller
+  and EVERY cold load's column assignment was subtly wrong (any reflow
+  shifted tiles). Those five utilities are now pinned in `style.css` with
+  identical values, so first placement = final placement. Also added
+  `html { scrollbar-gutter: stable; }` (no-op where scrollbars are overlay,
+  prevents width wobble where they take space) and the `window.__cvState`
+  spec hook.
+  (c) `tests/stl.spec.js` broke for an unrelated reason: the live category's
+  alphabetically-first STL file changed (now a 16:9 landscape poster, ~160px
+  tall), so the hardcoded +90px vertical drag exited the tile mid-drag →
+  pointerleave disposed the rig → camera null. Drag distances now derive from
+  the tile's real bounding box, and 5b/5c wait for the registry before
+  reading the camera. Regression: `tests/lite.spec.js` extended to 22
+  assertions (visual-order preservation in shuffle, both directions).
 
 - **2026-10-02 — lite mode (v1.20, this PR).** Speed-over-quality toggle, first
   class UI control: the ⚡ **Lite** chip in the header (next to S/M/L). Full mode
@@ -427,13 +456,16 @@ python3 -m http.server 8123        # any static server works; no build step
     shows End of Collection; reloading keeps the collection (localStorage);
     `?clips=1` boots straight into the feed. Automated: `tests/clips.spec.js`
     (17 assertions).
-27. Lite mode (v1.20): the ⚡ Lite chip (next to S/M/L) loads 1× thumbnails —
-    base thumbs drop to the smallest ladder bucket ≥ slot width (330px at M
-    density, 250px at S) and srcset carries no retina (2×) candidates; the
-    viewer still loads full-res. URL `lite=1`/`lite=0` overrides the stored
-    `vibe_lite` pref; the chip toggles + persists per device; toggling redraws
-    the feed (new cache keys, order/serendipity semantics unchanged).
-    Automated: `tests/lite.spec.js` (15 assertions).
+27. Lite mode (v1.20/v1.21): the ⚡ Lite chip (next to S/M/L) loads 1×
+    thumbnails — base thumbs drop to the smallest ladder bucket ≥ slot width
+    (330px at M density, 250px at S) and srcset carries no retina (2×)
+    candidates; the viewer still loads full-res. URL `lite=1`/`lite=0`
+    overrides the stored `vibe_lite` pref; the chip toggles + persists per
+    device. Toggling (either direction) PRESERVES the on-screen tiles and
+    their visual order — same set, same masonry positions, no reshuffle, no
+    scroll jump — in alpha, shuffle, deep and list modes.
+    Automated: `tests/lite.spec.js` (22 assertions, incl. shuffle
+    visual-order preservation).
 
 ## Cross-engine notes (Chromium / Firefox / WebKit)
 
@@ -645,10 +677,12 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 ### Lite mode (v1.20)
 
 - `liteThumbWidth()` / `feedThumbWidth()` / `litePref()` / `loadLite()` /
-  `syncLiteUI()` / `toggleLite()` — quality/speed mode used by the three feed
-  call sites (`iiurlwidth: feedThumbWidth()`) and `srcsetFor` (breaks before
-  adding responsiveUrls candidates when `state.lite`). The viewer call site
-  keeps its own 1600 request deliberately.
+  `syncLiteUI()` / `toggleLite()` / `redrawFeedInPlace()` — quality/speed mode
+  used by the three feed call sites (`iiurlwidth: feedThumbWidth()`) and
+  `srcsetFor` (breaks before adding responsiveUrls candidates when
+  `state.lite`). The viewer call site keeps its own 1600 request deliberately.
+  Toggling redraws the on-screen tiles IN PLACE (same set, same order —
+  v1.21); `resetAndFetch` only as fallback when nothing is on screen.
 - Cache safety: a different requested width produces different API URLs, so
   full and lite have disjoint localStorage cache entries — no mode can serve
   the other stale buckets.
@@ -665,6 +699,8 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   `writeURL` writes `clips=1` instead of a remote list id. Unclipping inside
   the feed removes the card + reflows instead of reloading (same philosophy as
   thumb recovery: a shuffle-like session is never thrown away).
+- `window.__cvState = state` (spec/debug hook, set with the other hooks) —
+  the app never reads it back.
 
 ### Category tree (v1.6)
 
