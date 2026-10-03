@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.27.1 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.27.2 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.27.1"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.27.2"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -536,7 +536,13 @@ async function loadList() {
   const url = listApiUrl(L);
   const cached = cacheGet(url, 3600e3); // snapshots: 1h
   if (cached) { L.titles = cached; return; }
-  const resp = await fetch(url, { signal: state.abort.signal, headers: { "Api-User-Agent": UA_NOTE } });
+  // NO custom headers (v1.27.2): a header-free GET stays a CORS *simple
+  // request*, and PagePile answers with access-control-allow-origin: * but
+  // sends no access-control-allow-headers — so the old `Api-User-Agent` header
+  // forced a preflight that FAILED, killing every PagePile feed with
+  // "Couldn't load the PagePile list: Failed to fetch" (found 2026-10-03 while
+  // testing pile creation; PetScan tolerates the header, pagepile does not).
+  const resp = await fetch(url, { signal: state.abort.signal });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   const data = await resp.json();
   let rows;
