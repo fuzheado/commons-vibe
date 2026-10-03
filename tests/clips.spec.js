@@ -63,7 +63,13 @@ async page => {
     { timeout: 30000 },
   );
   t("clips feed URL carries clips=1", page.url().includes("clips=1"), page.url());
-  t("dropdown shows My Clips label", ((await page.locator("#vibe-select option").first().textContent()) || "").startsWith("My Clips"));
+  // v1.28: the source menu renders a Lists group after Categories, so the active
+  // list is asserted via the SELECTED option (the mode is what matters here).
+  const clipOpt = await page.evaluate(() => {
+    const sel = document.getElementById("vibe-select");
+    return { text: sel.selectedOptions[0].textContent.trim(), value: sel.selectedOptions[0].value };
+  });
+  t("dropdown selects the My Clips entry", clipOpt.text.startsWith("My Clips") && clipOpt.value === "clips", JSON.stringify(clipOpt));
   t("sort pill hidden in list mode", await page.locator("#sort-pill").isHidden());
   const feedTitle = await page.evaluate(() =>
     decodeURIComponent(((document.querySelector(".group a.media-link") || {}).href || "").split("/wiki/")[1] || ""));

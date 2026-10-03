@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.27.2 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.28 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.27.2"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.28"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -299,8 +299,11 @@ function writeURL(mode) {
     sort: state.sortShuffle ? "shuffle" : "alpha",
     view: state.minimalView ? "min" : "det",
   });
-  if (!state.list) params.set("cat", state.currentCategory);
-  if (state.deepMode) params.set("deep", "1");
+  if (!state.list) {
+    params.set("cat", state.currentCategory);
+    // A list has no category tree, so deep= is meaningless there (v1.28 guard).
+    if (state.deepMode) params.set("deep", "1");
+  }
   params.set("size", state.size);
   params.set("type", state.type);
   if (state.list) {
@@ -319,7 +322,7 @@ function writeURL(mode) {
   // path= is appended raw — encodePath already encodes each segment, and
   // URLSearchParams would double-encode the % escapes (the %2520 ugliness).
   let qs = "?" + params.toString();
-  if (state.path.length > 1) qs += "&path=" + encodePath(state.path);
+  if (state.path.length > 1 && !state.list) qs += "&path=" + encodePath(state.path);
   // Toggles replace (view state); category navigation pushes (Back walks the
   // descent path — see popstate in init).
   if (mode === "push") history.pushState(null, "", qs);
@@ -336,24 +339,38 @@ function updateURL() {
 function rebuildDropdown() {
   const select = $("vibe-select");
   select.innerHTML = "";
-  if (state.list) {
-    const opt = document.createElement("option");
-    const L = state.list;
-    opt.text = L.source === "pile" ? `PagePile ${L.id}` : L.source === "psid" ? `PetScan ${L.id}` : L.source === "clips" ? `My Clips (${L.titles.length})` : `PetScan: ${L.id}`;
-    opt.selected = true;
-    select.add(opt);
-    return;
-  }
+  // Two groups now (v1.28, LISTS-DESIGN.md §2.3): Categories and Lists share the
+  // one source menu, and the mode is always visible because the active list is
+  // selected in its own group even when it was never saved (a shared URL).
   const lines = state.config
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const cats = lines.map((l) => (l.includes("|") ? l.split("|")[0].trim() : l.trim()));
-  if (!state.currentCategory && cats.length) state.currentCategory = cats[0];
-  const display = [...lines];
-  if (state.currentCategory && !cats.some((c) => normCat(c) === normCat(state.currentCategory))) {
+  const catLines = [];
+  const listEntries = [];
+  for (const line of lines) {
+    const parts = line.split("|").map((p) => p.trim());
+    const ref = parseListRef(parts[0]);
+    if (ref) listEntries.push({ ref, label: parts[1] || listRefLabel(ref) });
+    else catLines.push(line);
+  }
+  if (state.list && state.list.source !== "clips") {
+    const key = listRefKey(state.list);
+    if (!listEntries.some((e) => listRefKey(e.ref) === key)) {
+      const ref = { source: state.list.source, id: state.list.id, depth: state.list.depth || 1 };
+      listEntries.push({ ref, label: listRefLabel(ref) });
+    }
+  }
+
+  const cats = catLines.map((l) => (l.includes("|") ? l.split("|")[0].trim() : l.trim()));
+  if (!state.currentCategory && !state.list && cats.length) state.currentCategory = cats[0];
+  const display = [...catLines];
+  if (state.currentCategory && !state.list && !cats.some((c) => normCat(c) === normCat(state.currentCategory))) {
     display.push(state.currentCategory);
   }
+
+  const catGroup = document.createElement("optgroup");
+  catGroup.label = "Categories";
   for (const line of display) {
     let cat, label;
     if (line.includes("|")) {
@@ -367,9 +384,28 @@ function rebuildDropdown() {
     const opt = document.createElement("option");
     opt.value = cat;
     opt.text = label;
-    opt.selected = cat === state.currentCategory;
-    select.add(opt);
+    opt.selected = !state.list && cat === state.currentCategory;
+    catGroup.appendChild(opt);
   }
+  if (catGroup.children.length) select.add(catGroup);
+
+  const listGroup = document.createElement("optgroup");
+  listGroup.label = "Lists";
+  if (state.clips.length) {
+    const opt = document.createElement("option");
+    opt.value = "clips";
+    opt.text = `My Clips (${state.clips.length})`;
+    opt.selected = !!state.list && state.list.source === "clips";
+    listGroup.appendChild(opt);
+  }
+  for (const { ref, label } of listEntries) {
+    const opt = document.createElement("option");
+    opt.value = listRefValue(ref);
+    opt.text = label;
+    opt.selected = !!state.list && state.list.source === ref.source && String(state.list.id) === String(ref.id);
+    listGroup.appendChild(opt);
+  }
+  if (listGroup.children.length) select.add(listGroup);
 }
 
 /* ---------------- category tree helpers ---------------- */
@@ -526,6 +562,132 @@ function listApiUrl(L) {
   return `https://petscan.wmcloud.org/?language=commons&project=wikimedia&categories=${encodeURIComponent(L.id)}&ns%5B6%5D=1&depth=${L.depth}&format=json`;
 }
 
+/* ---------------- list references (v1.28 — LISTS-DESIGN.md §1.1) ----------------
+ * Prefix-only on purpose: a bare number is NOT a list. Numeric identifiers are
+ * not self-describing and Commons keeps minting new ones (QIDs, file ids, log
+ * ids), so every type claims its own prefix and the namespace stays open for
+ * the next one. Pasted URLs ARE accepted — they carry their type in the host and
+ * param, so the dominant copy-paste flow needs no prefix. */
+const LIST_LABEL = { pile: "PagePile", psid: "PetScan", pet: "PetScan" };
+
+function parseListRef(raw) {
+  const text = String(raw || "").trim();
+  if (!text) return null;
+  // Pasted PagePile URL: …pagepile.toolforge.org/…?id=116948
+  const pp = text.match(/pagepile\.toolforge\.org\/\S*[?&]id=(\d+)/i);
+  if (pp) return { source: "pile", id: pp[1], depth: 1 };
+  // Pasted PetScan URL: …?psid=12345, or …?categories=X&depth=N
+  const ps = text.match(/petscan\.wmcloud\.org\/\S*[?&]psid=(\d+)/i);
+  if (ps) return { source: "psid", id: ps[1], depth: 1 };
+  const pm = text.match(/petscan\.wmcloud\.org\/\S*[?&]categories=([^&]+)/i);
+  if (pm) {
+    const dm = text.match(/[?&]depth=(\d+)/i);
+    return { source: "pet", id: decodeURIComponent(pm[1]).replace(/\+/g, " "), depth: clampPetDepth(dm && dm[1]) };
+  }
+  // Prefixed forms: pile:116948 | psid:12345 | pet:Category:Name&depth=2
+  const m = text.match(/^(pile|psid|pet)\s*:\s*(.+)$/i);
+  if (!m) return null;
+  const source = m[1].toLowerCase();
+  let rest = m[2].trim();
+  if (source === "pet") {
+    const dm = rest.match(/^(.*?)&depth=(\d+)\s*$/i);
+    if (dm) rest = dm[1].trim();
+    if (!rest) return null;
+    return { source, id: asCategoryTitle(rest), depth: clampPetDepth(dm && dm[2]) };
+  }
+  if (!/^\d+$/.test(rest)) return null; // ids are numeric; anything else is a typo
+  return { source, id: rest, depth: 1 };
+}
+
+const clampPetDepth = (n) => Math.min(Math.max(parseInt(n, 10) || 1, 1), 5);
+const listRefKey = (ref) => `${ref.source}:${ref.id}`;
+function listRefValue(ref) {
+  return ref.source === "pet" ? `pet:${ref.id}${ref.depth > 1 ? `&depth=${ref.depth}` : ""}` : `${ref.source}:${ref.id}`;
+}
+function listRefLabel(ref) {
+  const base = ref.source === "psid"
+    ? `PetScan ${ref.id}`
+    : ref.source === "pet"
+      ? `PetScan: ${String(ref.id).replace(/^Category:/, "")}${ref.depth > 1 ? ` (depth ${ref.depth})` : ""}`
+      : `PagePile ${ref.id}`;
+  return base;
+}
+
+// Opening a list saves its reference into vibe_config (the same rule categories
+// follow) so it is one click away next time. Payloads never go here — see
+// LISTS-DESIGN.md §1.3 (config shares the localStorage budget with the API cache).
+function addListToConfig(ref, label) {
+  const key = listRefKey(ref);
+  const known = state.config.split("\n").some((l) => {
+    const r = parseListRef((l.includes("|") ? l.split("|")[0] : l).trim());
+    return r && listRefKey(r) === key;
+  });
+  if (known) return;
+  const line = listRefValue(ref) + (label ? ` | ${label}` : "");
+  state.config = state.config ? `${state.config.replace(/\s*$/, "")}\n${line}` : line;
+  saveConfig();
+}
+
+// Inline error reporter: the load-error line predates v1.28 but always carried
+// static text; lists need their own message (and window.alert is not an option
+// for a recoverable failure — see LISTS-DESIGN.md §2.2).
+function showLoadError(message) {
+  const el = $("load-error");
+  if (!el) return;
+  if (message) el.textContent = message;
+  el.classList.remove("hidden");
+}
+
+// Shared failure path for a list that will not load: drop the list, put the
+// source menu back, stop the spinner and report inline. Returns the message so
+// callers that reset the feed afterwards (the boot path) can re-show it —
+// resetAndFetch() deliberately clears #load-error.
+function reportListLoadFailure(ref, err) {
+  const label = LIST_LABEL[ref.source] || "list";
+  const message = `Couldn't load that ${label} list (${listRefValue(ref)}): ${err.message}`;
+  state.list = null;
+  rebuildDropdown();
+  syncListUI();
+  $("loading-spinner").classList.add("hidden");
+  showLoadError(message);
+  return message;
+}
+
+// Category-only affordances have no meaning over an arbitrary set: hide the tree
+// browser (and close it if it is open) while a list is active.
+function syncListUI() {
+  const inList = !!state.list;
+  const treeBtn = $("tree-btn");
+  if (treeBtn) treeBtn.classList.toggle("hidden", inList);
+  const treeModal = $("tree-modal");
+  if (inList && treeModal && !treeModal.classList.contains("hidden")) closeTreeModal();
+}
+
+// Open a list feed from ANY surface (URL boot, dropdown, search box, chips).
+// One place, so the invariants hold: a list has no breadcrumb trail and no deep
+// tree, and a failed load reports inline instead of alerting.
+async function openList(ref, { label = "", push = false } = {}) {
+  state.deepMode = false;
+  state.deepSerial = null;
+  state.path = [];
+  state.list = { source: ref.source, id: ref.id, depth: ref.depth || 1, cursor: 0, titles: [] };
+  addListToConfig(ref, label);
+  rebuildDropdown();
+  syncSortUI();
+  syncDeepUI();
+  syncListUI();
+  try {
+    await loadList();
+  } catch (e) {
+    console.error("list load failed:", e);
+    reportListLoadFailure(ref, e);
+    return false;
+  }
+  resetAndFetch();
+  if (push) history.pushState(null, "", location.href); // writeURL runs inside resetAndFetch
+  return true;
+}
+
 async function loadList() {
   const L = state.list;
   // Clips feed: titles come from the local collection — no external fetch.
@@ -583,16 +745,8 @@ async function listBatch() {
   return { pages, hasEnded: L.cursor >= L.titles.length };
 }
 
-function setList(source, id, depth) {
-  state.list = { source, id, depth: depth || 1, cursor: 0, titles: [] };
-  state.path = [];
-  syncDeepUI();
-  return loadList().catch((e) => {
-    console.error("list load failed:", e);
-    state.list = null;
-    window.alert(`Couldn't load that ${source === "pile" ? "PagePile" : "PetScan"} list: ${e.message}`);
-  });
-}
+/* openList() (v1.28) replaced the old setList() helper — one entry point for
+ * every surface that opens a feed from a list reference. */
 
 /* ---------------- clips / personal collection (v1.18) ---------------- */
 
@@ -796,6 +950,73 @@ function formatExport(files, fmt) {
   return "";
 }
 
+/* ---------------- export → PagePile (v1.28 — issue #32, LISTS-DESIGN.md §5) ----------------
+ * A pile is the Wikimedia-ecosystem way to hand someone a list: PetScan,
+ * GLAMorous, WQS, QuickCategories and others consume pile IDs, and CommonsVibe
+ * itself reopens them via ?pile=. Creation is a plain form-encoded POST —
+ * anonymous and cross-origin, and deliberately WITHOUT custom headers: PagePile
+ * answers preflights with access-control-allow-origin: * but no
+ * access-control-allow-headers, so any custom header (e.g. Api-User-Agent) is
+ * blocked by the browser — exactly what broke ?pile= until v1.27.2.
+ * Piles are public, static snapshots: editing means creating a new one. */
+let lastPileId = null;
+
+async function createPagePile() {
+  const { files } = exportSelection();
+  const titles = files.map((f) => f.title);
+  const status = $("export-pile-status");
+  if (!titles.length) return;
+  status.classList.remove("text-red-400");
+  status.textContent = `Publishing ${titles.length} file${titles.length === 1 ? "" : "s"}…`;
+  try {
+    const resp = await fetch("https://pagepile.toolforge.org/api.php", {
+      method: "POST",
+      body: new URLSearchParams({
+        action: "create_pile_with_data",
+        wiki: "commonswiki",
+        data: titles.join("\n"),
+      }),
+    });
+    const data = await resp.json().catch(() => null);
+    const id = data && data.pile && data.pile.id;
+    if (!id) throw new Error((data && (data.error || data.status)) || `HTTP ${resp.status}`);
+    lastPileId = String(id);
+    // Same rule as opening a list: remember it in the source menu.
+    addListToConfig({ source: "pile", id: lastPileId, depth: 1 }, "");
+    rebuildDropdown();
+    status.textContent = "";
+    setText("export-pile-id", lastPileId);
+    setText("export-pile-count", `${titles.length} file${titles.length === 1 ? "" : "s"}`);
+    const view = $("export-pile-view");
+    const json = $("export-pile-json");
+    if (view) view.href = `https://pagepile.toolforge.org/api.php?action=get_data&format=html&id=${id}`;
+    if (json) json.href = `https://pagepile.toolforge.org/api.php?action=get_data&format=json&id=${id}`;
+    const panel = $("export-pile-result");
+    if (panel) panel.classList.remove("hidden");
+  } catch (e) {
+    console.warn("PagePile creation failed:", e);
+    status.classList.add("text-red-400");
+    status.textContent = `PagePile creation failed: ${e.message}`;
+  }
+}
+
+function handleExportPileLink() {
+  if (!lastPileId) return;
+  navigator.clipboard.writeText(`${location.origin}/?pile=${lastPileId}`).then(
+    () => {
+      const b = $("export-pile-link");
+      if (b) { b.textContent = "link copied ✓"; setTimeout(() => { b.textContent = "copy feed link"; }, 1500); }
+    },
+    (e) => console.warn("clipboard failed:", e),
+  );
+}
+
+function handleExportPileOpen() {
+  if (!lastPileId) return;
+  closeExportModal();
+  openList({ source: "pile", id: lastPileId, depth: 1 });
+}
+
 const EXPORT_MIME = { json: "application/json", csv: "text/csv", txt: "text/plain", wiki: "text/plain" };
 const EXPORT_EXT = { json: "json", csv: "csv", txt: "txt", wiki: "wiki" };
 
@@ -820,6 +1041,11 @@ function updateExportPreview() {
 
 async function refreshExportScope(scope) {
   exportScope = scope;
+  // A pile result belongs to the selection it was created from (v1.28).
+  lastPileId = null;
+  const panel = $("export-pile-result");
+  if (panel) panel.classList.add("hidden");
+  setText("export-pile-status", "");
   const note = $("export-note");
   note.textContent = scope === "clips"
     ? "Exporting your clips collection (fetched fresh — artist/license fields come with the enriched pass, issue #30 phase 2)."
@@ -2820,9 +3046,16 @@ function resetAndFetch() {
   state.feedPages = [];
   $("masonry-container").innerHTML = "";
   ensureColumns(currentCols());
-  if (state.list) state.list.cursor = 0;
+  if (state.list) {
+    state.list.cursor = 0;
+    // List invariants (v1.28, LISTS-DESIGN.md §2.2): an arbitrary set has no
+    // category tree and no breadcrumb trail, whatever the URL asked for.
+    state.deepMode = false;
+    state.path = [];
+  }
   $("sort-pill").classList.toggle("hidden", !!state.list); // Alpha/Shuffle N/A for lists
   syncDeepUI(); // banner text tracks the new category when deep stays on
+  syncListUI(); // the tree browser is category-only (v1.28)
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
@@ -2849,6 +3082,16 @@ async function handleSearch(e) {
   const input = e.target;
   let val = input.value.trim();
   if (!val) return;
+  // A typed list reference (pile:/psid:/pet: or a pasted URL) opens a list feed
+  // instead of being mangled into a category title (v1.28).
+  const ref = parseListRef(val);
+  if (ref) {
+    e.preventDefault();
+    input.value = "";
+    hideCatSuggestions();
+    openList(ref);
+    return;
+  }
   if (!val.toLowerCase().startsWith("category:")) {
     val = "Category:" + val;
   } else {
@@ -2899,7 +3142,21 @@ async function handleModalSave() {
     .split("\n")
     .map((l) => l.trim())
     .filter(Boolean);
-  const catsToCheck = lines.map((line) => {
+  // v1.28: the same editor manages Lists (LISTS-DESIGN.md §5). List-reference
+  // lines are validated by cheap existence probes rather than page-title checks:
+  // a pile answers limit=1 with pages_total; psid/pet lines are format-checked
+  // only (a live PetScan query is expensive and their format is unambiguous).
+  const refLines = [];
+  const catLines = [];
+  const normalized = new Array(lines.length).fill(null);
+  lines.forEach((line, i) => {
+    const head = (line.includes("|") ? line.split("|")[0] : line).trim();
+    const ref = parseListRef(head);
+    if (ref) refLines.push({ ref, i });
+    else catLines.push({ line, i });
+  });
+  const catLabel = (i) => (lines[i].includes("|") ? lines[i].split("|")[1].trim() : "");
+  const catsToCheck = catLines.map(({ line }) => {
     const cat = line.includes("|") ? line.split("|")[0].trim() : line.trim();
     return cat.toLowerCase().startsWith("category:") ? cat : "Category:" + cat;
   });
@@ -2919,24 +3176,41 @@ async function handleModalSave() {
       }
     }
 
-    const normalizedLines = [];
-    const invalidCats = [];
-    for (let i = 0; i < lines.length; i++) {
-      const userCat = catsToCheck[i];
-      const official = titleMap.get(normCat(userCat));
-      if (official) {
-        const label = lines[i].includes("|") ? lines[i].split("|")[1].trim() : null;
-        normalizedLines.push(label ? `${official} | ${label}` : official);
-      } else {
-        invalidCats.push(userCat);
-      }
+    // Categories first (page-title validation), then list references.
+    const invalid = [];
+    for (let j = 0; j < catLines.length; j++) {
+      const { line, i } = catLines[j];
+      const official = titleMap.get(normCat(catsToCheck[j]));
+      if (!official) { invalid.push(catsToCheck[j]); continue; }
+      const label = catLabel(i);
+      normalized[i] = label ? `${official} | ${label}` : official;
     }
-
-    if (invalidCats.length) {
+    // Pile existence probes (max 8 new lines per save — cheap but not free);
+    // anything past that cap is accepted on its already-validated format.
+    const pileRefs = refLines.filter(({ ref }) => ref.source === "pile");
+    const toCheck = pileRefs.slice(0, 8);
+    const pileOk = new Set();
+    await Promise.all(toCheck.map(async ({ ref }) => {
+      try {
+        const r = await fetch(`https://pagepile.toolforge.org/api.php?action=get_data&id=${ref.id}&format=json&limit=1`);
+        const d = r.ok ? await r.json() : null;
+        if (d && Array.isArray(d.pages)) pileOk.add(listRefKey(ref));
+        else invalid.push(listRefValue(ref));
+      } catch {
+        invalid.push(listRefValue(ref));
+      }
+    }));
+    for (const { ref, i } of refLines) {
+      const checked = toCheck.some((c) => listRefKey(c.ref) === listRefKey(ref));
+      if (ref.source === "pile" && checked && !pileOk.has(listRefKey(ref))) continue; // reported above
+      const label = catLabel(i);
+      normalized[i] = listRefValue(ref) + (label ? ` | ${label}` : "");
+    }
+    if (invalid.length) {
       $("modal-error").classList.remove("hidden");
-      $("error-list").textContent = "Invalid categories: " + invalidCats.join(", ");
+      $("error-list").textContent = "Invalid categories/lists: " + invalid.join(", ");
     } else {
-      state.config = normalizedLines.join("\n");
+      state.config = normalized.filter(Boolean).join("\n");
       saveConfig();
       $("edit-modal").classList.add("hidden");
       rebuildDropdown();
@@ -2955,7 +3229,11 @@ async function handleModalSave() {
 function handleSelectChange(e) {
   // Dropdown picks start a fresh session — no breadcrumb linkage to the
   // category you happened to be on.
-  navigateTo(e.target.value, { fresh: true });
+  const val = e.target.value;
+  if (val === "clips") { openClips(); return; }
+  const ref = parseListRef(val);
+  if (ref) { openList(ref); return; } // Lists group (v1.28) — categories optgroup still exits list mode via navigateTo
+  navigateTo(val, { fresh: true });
 }
 
 function handleSortToggle() {
@@ -3469,11 +3747,55 @@ function renderCatSuggestions(list) {
   $("search-input").setAttribute("aria-expanded", "true");
 }
 
+/* List rows in the Jump box (v1.28, LISTS-DESIGN.md §1.1). Two shapes:
+ *  - a parsed list reference → an actionable "Open …" row. Piles get a cheap
+ *    existence probe (limit=1 also returns pages_total) so the row carries its
+ *    file count like the category rows do.
+ *  - a bare number → a non-actionable hint row teaching the prefixes. Bare
+ *    numbers are deliberately NOT lists: numeric ids aren't self-describing, and
+ *    the prefix namespace stays open for the next identifier type. */
+function renderListSuggestRow(ref) {
+  const box = $("search-suggest");
+  box.innerHTML =
+    `<li role="option" id="cat-opt-0" data-list-ref="${esc(listRefValue(ref))}"` +
+    ` class="cat-suggest-row cat-suggest-list" aria-selected="false">` +
+    `<span class="cat-suggest-name">🔗 Open ${esc(listRefLabel(ref))} as a feed</span>` +
+    `<span class="cat-suggest-meta" id="list-suggest-meta"></span></li>`;
+  box.classList.remove("hidden");
+  catActiveIndex = -1;
+  $("search-input").setAttribute("aria-expanded", "true");
+  if (ref.source !== "pile") return;
+  fetch(`https://pagepile.toolforge.org/api.php?action=get_data&id=${ref.id}&format=json&limit=1`)
+    .then((r) => (r.ok ? r.json() : null))
+    .then((d) => {
+      const meta = $("list-suggest-meta");
+      if (!meta || !d) return;
+      const total = d.pages_total != null ? d.pages_total : (d.pages || []).length;
+      meta.textContent = `${total.toLocaleString("en-US")} file${total === 1 ? "" : "s"}`;
+    })
+    .catch(() => { /* the count is a nicety — opening still works */ });
+}
+
+function renderListHintRow() {
+  const box = $("search-suggest");
+  box.innerHTML =
+    `<li class="cat-suggest-row cat-suggest-hint" aria-disabled="true">` +
+    `<span class="cat-suggest-name">Numeric IDs need a prefix</span>` +
+    `<span class="cat-suggest-meta">try pile:116948 or psid:12345</span></li>`;
+  box.classList.remove("hidden");
+  catActiveIndex = -1;
+  $("search-input").setAttribute("aria-expanded", "true");
+}
+
 // Progressive: each tier paints as soon as it lands, then counts arrive and
 // repaint (getCatInfo is disk-cached for 7d, so the repaint is usually instant).
 async function runCatSuggestions(q) {
   const reqId = ++catSuggestReqId;
   catLastQuery = q;
+  // v1.28: list references short-circuit the category search entirely.
+  const ref = parseListRef(q);
+  if (ref) { renderListSuggestRow(ref); return; }
+  if (/^\d+$/.test(q)) { renderListHintRow(); return; }
   const seen = new Map();
   const snapshot = () => [...seen.values()].slice(0, CAT_SUGGEST_MAX);
   const add = (titles, via) => {
@@ -3535,7 +3857,17 @@ function moveCatActive(delta) {
 function selectCatSuggestion(index) {
   const rows = [...document.querySelectorAll("#search-suggest .cat-suggest-row")];
   const row = rows[index];
-  if (row) navigateToCategory(row.getAttribute("data-title"));
+  if (!row) return;
+  const listRef = row.getAttribute("data-list-ref");
+  if (listRef) {
+    const ref = parseListRef(listRef);
+    $("search-input").value = "";
+    hideCatSuggestions();
+    if (ref) openList(ref);
+    return;
+  }
+  const title = row.getAttribute("data-title");
+  if (title) navigateToCategory(title);
 }
 
 function installCategoryAutocomplete() {
@@ -3555,6 +3887,15 @@ function installCategoryAutocomplete() {
 
   // mousedown (not click) so the pick wins the race against the input's blur.
   $("search-suggest").addEventListener("mousedown", (e) => {
+    const listRow = e.target.closest("[data-list-ref]");
+    if (listRow) {
+      e.preventDefault();
+      const ref = parseListRef(listRow.getAttribute("data-list-ref"));
+      input.value = "";
+      hideCatSuggestions();
+      if (ref) openList(ref);
+      return;
+    }
     const row = e.target.closest("[data-title]");
     if (!row) return;
     e.preventDefault();
@@ -3707,6 +4048,9 @@ async function init() {
   wire("export-copy", "click", handleExportCopy);
   wire("export-download", "click", handleExportDownload);
   wire("export-print", "click", () => window.print());
+  wire("export-pile", "click", createPagePile);
+  wire("export-pile-link", "click", handleExportPileLink);
+  wire("export-pile-open", "click", handleExportPileOpen);
   for (const radio of document.querySelectorAll('input[name="export-scope"]')) {
     radio.addEventListener("change", () => refreshExportScope(radio.value));
   }
@@ -3846,17 +4190,24 @@ async function init() {
   );
   observer.observe($("sentinel"));
 
+  let listLoadError = null;
   if (state.list) {
     try {
       await loadList();
     } catch (e) {
       console.error("list load failed:", e);
-      window.alert(`Couldn't load the ${state.list.source === "pile" ? "PagePile" : "PetScan"} list: ${e.message}`);
-      state.list = null;
+      listLoadError = reportListLoadFailure({ source: state.list.source, id: state.list.id, depth: state.list.depth || 1 }, e);
     }
   }
 
   resetAndFetch();
+  // resetAndFetch clears #load-error and re-shows the spinner (both are
+  // feed-level), so a list that failed on boot has to speak up again and stop
+  // the spinner once the feed is reset.
+  if (listLoadError) {
+    showLoadError(listLoadError);
+    $("loading-spinner").classList.add("hidden");
+  }
 
   // Shared links can boot with the tree modal open at a given depth (?tree=1&depth=N).
   // After resetAndFetch so the tree render isn't killed by the requestId bump.

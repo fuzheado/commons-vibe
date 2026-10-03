@@ -9,7 +9,40 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-03, v1.27.2 shipped with this commit; v1.15–v1.27.1 deployed)
+## Current state (updated 2026-10-03, v1.28 shipped with this commit; v1.15–v1.27.2 deployed)
+
+- **2026-10-03 — Lists v1.28: reference entry, saved lists, and PagePile publishing.**
+  First phase of [`LISTS-DESIGN.md`](LISTS-DESIGN.md) (the design doc for arbitrary
+  collections; issues #32/#33).
+  **Entry:** the Jump box accepts `pile:<id>`, `psid:<id>`, `pet:<Category>&depth=N`
+  and pasted PagePile/PetScan URLs; a parsed reference short-circuits the category
+  search and shows one actionable row (`🔗 Open PagePile 116948 as a feed`,
+  with a cheap `limit=1` probe filling in the file count). Bare numbers are
+  deliberately NOT lists — an all-digits query gets a non-actionable hint row
+  teaching the prefixes, which keeps the numeric namespace open for future
+  identifier types. Enter and click both open the feed.
+  **Saved lists:** list references live in `vibe_config` (pointers only — the key
+  shares localStorage with the 2 MB API cache, so payloads never go there), the
+  source dropdown now renders **Categories** and **Lists** groups (the active list
+  is listed even when it was never saved, so the mode is always visible), any list
+  you open or create is auto-added, and the ✏️ editor ("Edit Categories & Lists")
+  accepts list lines — piles are validated by an existence probe (cap 8 per save),
+  `psid:`/`pet:` on format alone.
+  **Publishing (issue #32):** the export dialog has **Create PagePile** — a plain
+  form-encoded POST, anonymous, and deliberately header-free (PagePile preflights
+  allow `origin: *` but no headers, the v1.27.2 lesson). The result panel shows the
+  pile id plus view/JSON links, a "copy feed link" button (`?pile=<id>`) and
+  "open as feed".
+  **The four category-assumption leaks fixed** (§2.2 of the design doc, all
+  reproduced first): `path=` and `deep=1` are now dropped for list feeds (the URL
+  self-heals; crumbs and the Deep chip/banner stay hidden), the tree browser is
+  hidden in list mode, and list-load failures report inline in `#load-error` —
+  including the boot path, where the message used to be wiped by the following
+  `resetAndFetch()` and the spinner never stopped (both found by the new spec).
+  `setList()` was folded into one `openList()` entry point.
+  Regression: `tests/lists.spec.js` (23 assertions). Note: the spec exercises
+  real publishing, so a suite run leaves one small 2-file pile behind.
+  Issue #33 (ingestion, list health, `?list=local:`) is the next phase.
 
 - **2026-10-03 — PagePile feeds were broken by a request header (v1.27.2).**
   `?pile=` (any PagePile list feed) failed with "Couldn't load the PagePile
@@ -460,13 +493,14 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `style.css` | Custom CSS (drawer, minimal-mode overlay, toggles). Unchanged from PyScript era. |
 | `categories.txt` | Seed category list. Format per line: `Category:Name | Label` (label optional). |
 | `README.md` / `PRD.md` / `DEPLOY.md` / `AGENTS.md` | Project docs. `AGENTS.md` = agent working rules (renamed from `GEMINI.md` on 2026-09-10 — the name only ever meant "Gemini reads this"). |
+| `LISTS-DESIGN.md` | Design direction for **arbitrary collections** (PagePile/PetScan lists, imports, clips): prefix-only list references, `vibe_config` for pointers vs payloads, ingestion design, the category-assumption audit, and the phase plan (issues #32, #33). Not project state — HANDOFF is. |
 | `LICENSE` | MIT (Toolforge rule: OSI license required). |
 | `.htaccess` | **Inert on the live host** — Toolforge serves `public_html` via lighttpd, which ignores it (verified 2026-09-10: the file itself returns HTTP 200). The `*.md` docs it was meant to block were **deleted from `public_html` on 2026-09-11** (all now 404), so the effective rule is "never copy `*.md` into `public_html`". Kept for a future Apache-style host. `*.txt` must stay servable (app fetches `categories.txt`), so any real `*.md` block must exclude `*.txt`. |
 | `.idx/` | Firebase Studio (IDX) dev-env config — not app code, leave alone. |
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (10 assertions, v1.26 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, zero case; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (36 assertions, issue #23 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (10 assertions, v1.26 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, zero case; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -670,6 +704,13 @@ python3 -m http.server 8123        # any static server works; no build step
     1h, hidden on failure. `api()` gains a `detach: true` option so this
     request survives feed aborts. Automated: `tests/deep-banner.spec.js`
     (10 assertions).
+33. Lists v1.28 (LISTS-DESIGN.md phase 1): list references entered in the Jump box
+    (`pile:`/`psid:`/`pet:`, pasted URLs, numeric-hint row), saved as pointers in
+    `vibe_config`, rendered as a **Lists** group beside **Categories** in the source
+    menu, editable in the ✏️ modal, and the four category-assumption leaks fixed.
+    Export gains **Create PagePile** (header-free anonymous POST) with a result
+    panel linking back via `?pile=`. Automated: `tests/lists.spec.js` (23 assertions).
+    Next phase: #33 (ingestion, list health, `?list=local:`).
 32. Ordered subtree browse (v1.27, issue #31(b)): `deep=1&sort=alpha` walks
     the subtree post-order (subcategories alphabetically before the category's
     own files; root's bulk last), streaming 12 tiles at a time through the
@@ -1210,8 +1251,16 @@ fine for a snapshot feature, wrong for a live shuffle.
    Root cause: Toolforge serves `public_html` via lighttpd, which ignores the
    repo's `.htaccess` — the old "blocked from web" note was never true.
 
-10. **Lite shuffle-order assertion flakes occasionally in-suite** (seen once,
-    2026-10-02 v1.25 suite run 1; passed standalone and in the immediate re-run).
+10. **Live-API specs flake occasionally in-suite — and the fix is to wait for
+    state, not for time.** Seen twice: the lite shuffle-order assertion
+    (2026-10-02, v1.25 suite run 1) and the deep-serial sort-toggle "tiles render"
+    checks (2026-10-03, v1.28 suite run) — both passed standalone and on re-run.
+    The deep-serial checks were fixed by replacing fixed `waitForTimeout` sleeps
+    with `waitForFunction(... .group >= 12, {timeout: 90000})`: on a live API a
+    cold subtree walk can exceed any fixed sleep, and a sleep-based assertion
+    turns a slow response into a red suite. When adding specs that assert *a feed
+    rendered*, always wait for the condition. The lite order assertion is a
+    different animal (order, not presence — see the note below). Original note:
     Symptom: `shuffle→lite: SAME tiles, SAME visual order` diffs at one position
     while both snapshots have 12 tiles — consistent with two tiles swapping
     visual slots (a masonry placement tie-break) rather than a reshuffle (a

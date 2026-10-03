@@ -20,9 +20,9 @@
 
     <div id="edit-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
         <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-            <h2 class="text-lg font-bold text-white mb-2 uppercase tracking-tighter p-6 pb-2">Edit Category List</h2>
+            <h2 class="text-lg font-bold text-white mb-2 uppercase tracking-tighter p-6 pb-2">Edit Categories &amp; Lists</h2>
             <div class="px-6 flex-1 overflow-hidden flex flex-col">
-                <p class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest">One category per line. Format: <code class="text-blue-400">Category:Name | Label</code></p>
+                <p class="text-[10px] text-zinc-500 mb-4 uppercase tracking-widest">One per line — categories (<code class="text-blue-400">Category:Name | Label</code>) and list references (<code class="text-blue-400">pile:116948</code>, <code class="text-blue-400">psid:12345</code>, <code class="text-blue-400">pet:Category:Name&amp;depth=2</code>)</p>
                 <textarea id="modal-textarea" class="w-full flex-1 bg-black text-zinc-300 font-mono text-sm p-4 border border-zinc-800 rounded-xl focus:border-blue-500 outline-none mb-4 resize-none" rows="20" style="min-height: 450px;"></textarea>
                 <div id="modal-error" class="hidden bg-red-900/20 border border-red-500/50 rounded-lg p-3 mb-4">
                     <p class="text-xs text-red-400 font-bold uppercase tracking-wider mb-1">Validation Failed</p>
@@ -120,6 +120,22 @@
                     </div>
                 </div>
                 <p id="export-note" class="text-[10px] text-zinc-500 leading-relaxed"></p>
+                <div class="border-t border-zinc-800 pt-3 flex flex-col gap-2">
+                    <div class="flex items-center gap-3 flex-wrap">
+                        <button id="export-pile" class="px-3 py-1.5 text-[10px] font-black uppercase tracking-widest text-white bg-purple-700 hover:bg-purple-600 rounded-lg transition-colors" title="Publish this selection as a PagePile — a public, static list on commonswiki that PetScan, GLAMorous, WQS and others can consume (and CommonsVibe can reopen via ?pile=)">Create PagePile</button>
+                        <span id="export-pile-status" class="text-[10px] text-zinc-500"></span>
+                    </div>
+                    <div id="export-pile-result" class="hidden bg-purple-950/30 border border-purple-800/50 rounded-xl p-3 flex flex-col gap-1.5">
+                        <p class="text-[10px] text-purple-200 font-bold uppercase tracking-widest">PagePile <span id="export-pile-id" class="text-white"></span> created — <span id="export-pile-count"></span></p>
+                        <div class="flex flex-wrap gap-2 text-[10px] font-mono">
+                            <a id="export-pile-view" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">view pile ↗</a>
+                            <a id="export-pile-json" target="_blank" rel="noopener" class="text-blue-400 hover:text-blue-300 underline">JSON ↗</a>
+                            <button id="export-pile-link" class="text-blue-400 hover:text-blue-300 underline" title="Copy a CommonsVibe URL that reopens this pile as a feed">copy feed link</button>
+                            <button id="export-pile-open" class="text-emerald-400 hover:text-emerald-300 underline" title="Open this pile as a feed now">open as feed</button>
+                        </div>
+                        <p class="text-[9px] text-purple-300/70">Public and static — anyone with the ID can read it; editing means creating a new pile.</p>
+                    </div>
+                </div>
                 <pre id="export-preview" class="bg-black text-zinc-400 font-mono text-[10px] leading-relaxed p-4 border border-zinc-800 rounded-xl overflow-auto max-h-64 whitespace-pre-wrap break-all"></pre>
             </div>
             <div class="px-6 py-4 border-t border-zinc-800 flex justify-end gap-2">
@@ -153,7 +169,7 @@
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span id="app-version">v1.27.2</span>
+                    <span id="app-version">v1.28</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>

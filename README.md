@@ -18,7 +18,7 @@ Designed for the curious browser rather than a technical expert, it brings a "Pi
 * **Quickly scrub and play video** by visiting a category of WebM videos and hovering your pointer over a tile to preview it without sound. (On mobile, tapping a tile opens the file page on Commons.)
 * **Spin the 🎲 roulette** to hop into a random subcategory, and **filter by media type** (images / video / audio / 3D models) from the header.
 * **Spin 3D models in place** — STL tiles render an interactive WebGL viewer on hover: drag to spin (yaw/pitch), wheel to zoom, auto-rotating until you grab it. Posters stay until you hover, bytes load on intent, and files too big to spin (40MB+) keep their thumbnail.
-* **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed.
+* **Feed it a PetScan query or PagePile** — append `?pet=<Category>&petdepth=N`, `?psid=<id>` or `?pile=<id>` to the URL and the list becomes a browsable, shareable feed, **or type `pile:116948` / `psid:12345` / `pet:Category:Name&depth=2` in the Jump box** (pasted PagePile/PetScan URLs work too). Opened lists are remembered in the source menu's **Lists** group alongside your categories.
 * **Clip images into a personal collection** — hit the bookmark button on any tile (or "✂ Clip this" in the viewer); your collection lives in the browser and browses as its own feed via the header chip or `?clips=1`.
 * **Export or print a feed** — the download button in the header exports the current feed (or your clips) as JSON, CSV, a plain `File:` list, or wiki `<gallery>` markup, and the PDF/Print button renders the feed as a light 3-column contact sheet through your browser's print dialog.
 
@@ -72,7 +72,7 @@ CommonsVibe is evolving from a browser into a personal curation tool. Planned fe
 * **Enhanced Search:** Natural language tools to find "vibes" without needing to know exact category names.
 * **~~Filtering~~ — shipped in v1.11:** media-type filter (images / video / audio) in the header, applied server-side in shuffle mode and client-side elsewhere. Still open: granular filters (e.g. exclude TIFF specifically).
 * **~~Lite mode~~ — shipped in v1.20:** speed-over-quality toggle (1× thumbs, no retina candidates, viewer stays full-res) via the header chip or `?lite=1`.
-* **~~Export~~ — first slice shipped in v1.22:** the header **Export** button exports the current feed or your clips as JSON / CSV / plain text / wiki gallery markup (copy or download), or prints the feed as a light 3-column PDF contact sheet via the browser's own print-to-PDF. Still open (issue #30): enriched metadata (artist/license), PetScan handoff for whole large categories, and JSON re-import as a shareable session.
+* **~~Export~~ — first slice shipped in v1.22:** the header **Export** button exports the current feed or your clips as JSON / CSV / plain text / wiki gallery markup (copy or download), or prints the feed as a light 3-column PDF contact sheet via the browser's own print-to-PDF. **v1.28 added PagePile publishing:** the export dialog's *Create PagePile* button turns the current feed or your clips into a public, static list on commonswiki — consumable by PetScan, GLAMorous, WQS and others, and reopenable in CommonsVibe via `?pile=`. Still open (issue #30): enriched metadata (artist/license), PetScan handoff for whole large categories, and JSON re-import as a shareable session (issue #33).
 
 ---
 

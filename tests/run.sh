@@ -42,6 +42,7 @@ run_spec tests/title-wrap.spec.js      "title-wrap spec (v1.23 — case-faithful
 run_spec tests/deep-banner.spec.js     "deep-banner spec (v1.26 — subtree count)"    || exit 1
 run_spec tests/deep-serial.spec.js     "deep-serial spec (v1.27 — subtree browse)"  || exit 1
 run_spec tests/pile-read.spec.js       "pile-read spec (v1.27.2 — PagePile CORS)"   || exit 1
+run_spec tests/lists.spec.js           "lists spec (v1.28 — entry, guards, publish)" || exit 1
 run_spec tests/stl.spec.js             "STL spec (3D viewer)"                         || exit 1
 run_spec tests/engine-quirks.spec.js   "engine-quirks spec (cross-engine facts)"      || exit 1
 

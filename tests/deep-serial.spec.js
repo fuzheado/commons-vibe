@@ -66,8 +66,17 @@ async page => {
   t("walk: drawn titles unique (dedupe across categories)", dedupe.drawn >= 24 && dedupe.unique === dedupe.drawn, `${dedupe.unique}/${dedupe.drawn} unique`);
 
   // ── 4. Sort toggle switches walking/sampling, deep stays on ───────────
+  // Wait for a NEW feed (requestId bump) that has tiles — a bare tile count is
+  // already satisfied by the pre-click feed, which both flaked and false-passed
+  // in-suite on 2026-10-03. The sampler's first batch also races the subtree walk
+  // (800ms), so allow real time.
+  const reqShuffle = await page.evaluate(() => window.__cvState.requestId);
   await page.locator("#sort-toggle").click();
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(
+    (r) => window.__cvState.requestId > r && document.querySelectorAll(".group").length >= 12,
+    reqShuffle,
+    { timeout: 90000 },
+  ).catch(() => {});
   const shuf = await page.evaluate(() => ({
     url: location.search,
     chip: !document.getElementById("deep-chip").classList.contains("hidden"),
@@ -78,8 +87,13 @@ async page => {
   t("toggle→shuffle: banner switches to Deep shuffle", /Deep shuffle/.test(await banner()), (await banner()).slice(0, 60));
   t("toggle→shuffle: tiles render (sampler)", (await page.evaluate(() => document.querySelectorAll(".group").length)) >= 12);
 
+  const reqAlpha = await page.evaluate(() => window.__cvState.requestId);
   await page.locator("#sort-toggle").click();
-  await page.waitForTimeout(2500);
+  await page.waitForFunction(
+    (r) => window.__cvState.requestId > r && document.querySelectorAll(".group").length >= 12,
+    reqAlpha,
+    { timeout: 90000 },
+  ).catch(() => {});
   const back = await page.evaluate(() => ({
     url: location.search,
     serial: !!window.__cvState.deepSerial,
