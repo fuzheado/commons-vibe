@@ -90,6 +90,35 @@ async page => {
   t("toggle→alpha: serial walker active again", back.serial === true);
   t("toggle→alpha: tiles render again", back.tiles >= 12, `${back.tiles} tiles`);
 
+  // ── 5. Big-page category: no titles= overflow (v1.27.1 regression) ────
+  // Files from Google Arts & Culture has 50-member categorymembers pages and
+  // ~100-char filenames. Before the fix, the walker drained a whole page into
+  // one batch and handed batchInfo 51+ titles → API toomanyvalues → the feed
+  // died with "Couldn't load images". Reported 2026-10-02 from live.
+  const gacErrors = [];
+  const onGacErr = (m) => { if (m.type() === "error" && !/tailwind/i.test(m.text())) gacErrors.push(m.text().slice(0, 140)); };
+  page.on("console", onGacErr);
+  await page.goto(BASE + "/?sort=alpha&view=det&cat=Category%3AFiles+from+Google+Arts+%26+Culture&deep=1&size=m&type=all&lite=1", { waitUntil: "domcontentloaded" });
+  await page.waitForFunction(() => document.querySelectorAll(".group").length >= 12, null, { timeout: 90000 }).catch(() => {});
+  await page.waitForTimeout(2500);
+  const gac = await page.evaluate(() => {
+    const titles = window.__cvState.feedPages.map((p) => p.title);
+    return {
+      tiles: document.querySelectorAll(".group").length,
+      unique: new Set(titles).size,
+      drawn: titles.length,
+      errorShown: !document.getElementById("load-error").classList.contains("hidden"),
+      buffered: !!(window.__cvState.deepSerial && Array.isArray(window.__cvState.deepSerial.buffer)),
+    };
+  });
+  const overflow = gacErrors.some((e) => /toomanyvalues/.test(e));
+  t("google-arts: walk renders tiles from a 50-member page category", gac.tiles >= 12, `${gac.tiles} tiles`);
+  t("google-arts: no titles= overflow (toomanyvalues) in the console", overflow === false, gacErrors[0] || "clean");
+  t("google-arts: feed did not die (no load-error banner)", gac.errorShown === false);
+  t("google-arts: walker buffers whole pages", gac.buffered === true);
+  t("google-arts: no duplicate tiles", gac.drawn > 0 && gac.unique === gac.drawn, `${gac.unique}/${gac.drawn}`);
+  page.off("console", onGacErr);
+
   if (failed) throw `${failed} failed\n${results.join("\n")}`;
   console.log(results.join("\n"));
   return `deep-serial spec: all ${results.length} assertions pass`;

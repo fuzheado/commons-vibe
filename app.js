@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.27 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.27.1 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.27"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.27.1"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -1024,6 +1024,7 @@ async function deepSerialTitles(want) {
       catsSeen: new Set(),
       current: null,   // category whose file pages are being drained
       cursor: null,    // its cmcontinue token
+      buffer: [],      // titles from the last page, awaiting emission (≤50)
       budget: DEEP_SERIAL_MAX_CATS,
       done: false,
     };
@@ -1032,6 +1033,22 @@ async function deepSerialTitles(want) {
   const out = [];
   while (out.length < want && !s.done) {
     if (s.current) {
+      // Emit from the buffered page first. A categorymembers page holds up to
+      // 50 titles and the API's `titles=` limit is 50 — draining a whole page
+      // into one batch handed batchInfo 51+ titles (toomanyvalues, the feed
+      // died with "Couldn't load images" on Files from Google Arts & Culture,
+      // 2026-10-02). Buffer instead of consuming: nothing is dropped and the
+      // page's own cursor can't be split.
+      if (s.buffer.length) {
+        while (out.length < want && s.buffer.length) {
+          const title = s.buffer.shift();
+          if (state.seenTitles.has(title)) continue;
+          state.seenTitles.add(title);
+          out.push(title);
+        }
+        if (!s.buffer.length && !s.cursor) s.current = null;
+        continue;
+      }
       const params = { action: "query", list: "categorymembers", cmtitle: s.current, cmtype: "file", cmlimit: "50" };
       if (s.cursor) Object.assign(params, s.cursor);
       let data;
@@ -1041,15 +1058,12 @@ async function deepSerialTitles(want) {
         console.warn("deep browse: skipping", s.current, e.message);
         s.current = null;
         s.cursor = null;
+        s.buffer = [];
         continue;
       }
       s.cursor = data.continue || null;
-      for (const m of (data.query && data.query.categorymembers) || []) {
-        if (state.seenTitles.has(m.title)) continue;
-        state.seenTitles.add(m.title);
-        out.push(m.title);
-      }
-      if (!s.cursor) s.current = null;
+      s.buffer = ((data.query && data.query.categorymembers) || []).map((m) => m.title);
+      if (!s.buffer.length && !s.cursor) s.current = null; // empty category
       continue;
     }
     if (!s.stack.length) { s.done = true; break; }
@@ -1165,6 +1179,14 @@ function filterShufflePages(pages) {
 // The shared 12-title imageinfo batch for drawn titles (shuffle, deep, and the
 // starve fallback all fetch the same props — see HANDOFF's iiprop gotcha).
 async function batchInfo(titles) {
+  // Defense in depth (v1.27.1): the API caps `titles=` at 50. The serial walker
+  // once handed over 51+ titles (a full categorymembers page plus the batch's
+  // remainder); chunk here too so no caller can trip toomanyvalues.
+  if (titles.length > 50) {
+    const all = [];
+    for (let i = 0; i < titles.length; i += 50) all.push(...(await batchInfo(titles.slice(i, i + 50))));
+    return all;
+  }
   const info = await api({
     action: "query",
     titles: titles.join("|"),
