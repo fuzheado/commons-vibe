@@ -18,6 +18,9 @@ async page => {
   const BASE = "http://127.0.0.1:8123";
   const CAT = "Category%3AChop%20Suey";
   const countText = () => page.evaluate(() => document.getElementById("deep-banner-count").textContent);
+  // Wait for the banner's probe to SETTLE (a zero now renders blank, so waiting
+  // for specific text can never satisfy) — v1.28.2 exposes state.deepCountDone.
+  const settled = () => page.waitForFunction(() => !!window.__cvState.deepCountDone, null, { timeout: 45000 }).catch(() => {});
   const totalhits = (type) => page.evaluate(async (type) => {
     const terms = { all: "", image: ' filetype:"bitmap|drawing"', video: " filetype:video" };
     const q = `deepcategory:"Chop Suey"${terms[type] || ""}`;
@@ -41,11 +44,7 @@ async page => {
 
   await page.goto(BASE + "/?cat=" + CAT + "&deep=1", { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".group", { timeout: 30000 });
-  await page.waitForFunction(
-    () => /·/.test(document.getElementById("deep-banner-count").textContent),
-    null,
-    { timeout: 30000 },
-  );
+  await settled();
   const deepAll = await countText();
   const apiAll = await totalhits("all");
   t("deep: banner visible", !(await page.evaluate(() => document.getElementById("deep-banner").classList.contains("hidden"))));
@@ -53,24 +52,19 @@ async page => {
   t("deep: count equals the live API totalhits", deepAll.includes(apiAll.toLocaleString()), `banner="${deepAll}" api=${apiAll}`);
 
   await page.selectOption("#type-select", "image");
-  await page.waitForFunction(
-    () => /images/.test(document.getElementById("deep-banner-count").textContent),
-    null,
-    { timeout: 30000 },
-  );
+  await settled();
   const deepImage = await countText();
   t("deep + type=image: number qualifies as images", / · ≈[\d,]+ images$/.test(deepImage), JSON.stringify(deepImage));
   t("deep + type=image: matches the API's filtered totalhits", deepImage.includes((await totalhits("image")).toLocaleString()), deepImage);
 
   await page.selectOption("#type-select", "video");
-  await page.waitForFunction(
-    () => /no videos|videos/.test(document.getElementById("deep-banner-count").textContent),
-    null,
-    { timeout: 30000 },
-  );
+  await settled();
   const deepVideo = await countText();
   const apiVideo = await totalhits("video");
-  t("deep + type=video: zero renders as 'no videos'", apiVideo === 0 ? deepVideo === " · no videos" : /videos$/.test(deepVideo), `banner="${deepVideo}" api=${apiVideo}`);
+  // v1.28.2: a zero is no longer printed at all — the search index lies about
+  // container categories and getCatInfo's 7-day cache can hold a stale zero, so
+  // the banner only ever prints a count it actually has.
+  t("deep + type=video: no count is claimed for a zero", apiVideo === 0 ? deepVideo === "" : /videos$/.test(deepVideo), `banner="${deepVideo}" api=${apiVideo}`);
 
   await page.locator("#deep-banner-off").click();
   await page.waitForTimeout(600);
@@ -80,6 +74,19 @@ async page => {
   }));
   t("deep off: banner hidden again", afterOff.hidden === true);
   t("deep off: count cleared", afterOff.count === "", JSON.stringify(afterOff.count));
+
+  // ── 5. Container category: deepcategory answers 0, the walk knows better ──
+  // Category:WikiPortraits in New York City in 2026 is a hidden CONTAINER: 0
+  // direct files, 5 subcategories. CirrusSearch's deepcategory returns 0 for it
+  // (its non-hidden parent returns tens of thousands) while the subtree really
+  // holds files — reported 2026-10-03 as the banner saying "· no files".
+  await page.goto(BASE + "/?sort=shuffle&view=det&cat=Category%3AWikiPortraits+in+New+York+City+in+2026&deep=1&size=m&type=all", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".group", { timeout: 60000 }).catch(() => {});
+  await settled();
+  const container = await countText();
+  t("container: deepcategory 0 falls back to the walk's subtree count", / · ≈[\d,]+ files$/.test(container), JSON.stringify(container));
+  t("container: never claims 'no files' when the subtree has files", !/no files/.test(container), JSON.stringify(container));
+  t("container: the feed still renders", (await page.evaluate(() => document.querySelectorAll(".group").length)) >= 12);
 
   if (failed) throw `${failed} failed\n${results.join("\n")}`;
   console.log(results.join("\n"));

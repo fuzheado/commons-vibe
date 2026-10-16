@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.28.1 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.28.2 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.28.1"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.28.2"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -58,6 +58,7 @@ const state = {
   seenTitles: new Set(),         // shuffle-mode dedupe within a session
   deepMode: false,               // shuffle across the whole subcategory tree
   deepSerial: null,              // serial subtree-walk cursor (v1.27, deep+alpha)
+  deepCountDone: null,           // set when the banner's subtree count settles (spec/debug hook)
   treeOpen: false,               // tree modal visibility (URL param tree=1)
   treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
   size: "m",                     // tile density s|m|l (URL param size=)
@@ -2852,12 +2853,27 @@ const setText = (id, value) => { const el = $(id); if (el) el.textContent = valu
 const TYPE_COUNT_LABEL = { all: "files", image: "images", video: "videos", audio: "audio files", "3d": "3D models" };
 let deepCountKey = null; // category|type of the number currently shown — skips refetch
 let deepCountSeq = 0;    // stale-response guard across rapid changes
+// The subtree walk the deep sampler already runs carries every category's direct
+// file count, so summing them yields a subtree total that works exactly where
+// deepcategory fails. Caveat, hence the "≈": these are memberships, not unique
+// files — a file cross-listed in two subcategories counts twice (Quality images
+// of China: 2,213 memberships vs 1,388 unique). Returns { pending } while the
+// walk is still in flight so the caller can re-render when it lands.
+async function walkSubtreeTotal(waitMs = 3000) {
+  if (!state.deepWalk) state.deepWalk = collectSubtree(state.currentCategory).catch(() => null);
+  const walk = state.deepWalk;
+  const pool = await Promise.race([walk, sleep(waitMs).then(() => null)]);
+  if (!pool) return { pending: walk };
+  return { sum: pool.reduce((s, n) => s + (n.files || 0), 0), nodes: pool.length };
+}
+
 async function refreshDeepCount() {
   if (!state.deepMode) return;
   const key = `${state.currentCategory}|${state.type}`;
   if (key === deepCountKey) return;
   const seq = ++deepCountSeq;
   deepCountKey = key;
+  state.deepCountDone = null; // spec/debug hook: set when the probe settles
   setText("deep-banner-count", "");
   try {
     const cat = escQ(state.currentCategory.replace(/^Category:/, "").replace(/_/g, " "));
@@ -2868,10 +2884,35 @@ async function refreshDeepCount() {
       srnamespace: "6",
       srlimit: "1",
     }, { ttl: 3600e3, detach: true });
-    const total = data.query && data.query.searchinfo && data.query.searchinfo.totalhits;
-    if (seq !== deepCountSeq || !state.deepMode || typeof total !== "number") return;
+    let total = data.query && data.query.searchinfo && data.query.searchinfo.totalhits;
+    if (typeof total !== "number") return;
+    if (total === 0 && state.type === "all") {
+      // CirrusSearch's deepcategory answers 0 for container categories that hold
+      // no files directly (reported 2026-10-03: Category:WikiPortraits in New
+      // York City in 2026 — hidden, 0 direct files, 5 subcategories; deepcategory
+      // 0, the non-hidden parent 69,414, while the subtree really holds files).
+      // The walk knows better and is already cached for deep mode.
+      const walk = await walkSubtreeTotal();
+      if (walk.pending) {
+        // Unknown yet, and "no files" would be a lie: leave it blank and let the
+        // walk re-render once it lands (deepCountKey reset so the re-run is not
+        // swallowed by the same-key guard).
+        deepCountKey = null;
+        walk.pending.then(() => { if (state.deepMode) refreshDeepCount(); });
+        return;
+      }
+      total = walk.sum;
+    }
+    if (seq !== deepCountSeq || !state.deepMode) return;
     const label = TYPE_COUNT_LABEL[state.type] || "files";
-    setText("deep-banner-count", total === 0 ? ` · no ${label}` : ` · ≈${total.toLocaleString()} ${label}`);
+    // Only ever print a number we actually have. A zero is NOT trustworthy here:
+    // the search index answers 0 for container categories (above), and the walk's
+    // per-category counts arrive through getCatInfo's 7-day cache, so a stale
+    // zero could claim "no files" for a subtree that has them (the reported bug,
+    // and a second path to it found while fixing it). When there is genuinely
+    // nothing, the feed itself says "End of Collection".
+    setText("deep-banner-count", total > 0 ? ` · ≈${total.toLocaleString()} ${label}` : "");
+    state.deepCountDone = { key, total };
   } catch (e) {
     if (seq === deepCountSeq) deepCountKey = null; // let the next sync retry
     console.warn("deep count failed:", e);

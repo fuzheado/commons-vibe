@@ -33,6 +33,18 @@ async page => {
   const rows = () => page.evaluate(() =>
     [...document.querySelectorAll("#search-suggest .cat-suggest-row")].map((r) => r.textContent.replace(/\s+/g, " ").trim()));
 
+  // Save the list editor and wait for it to SETTLE — validation is live (page-title
+  // checks plus a PagePile probe per pile line, which 500s for a bad id), so a
+  // fixed sleep is a race. Settled = modal closed (accepted) or error shown.
+  const saveAndSettle = async () => {
+    await page.locator("#modal-save").click();
+    await page.waitForFunction(() => {
+      const modal = document.getElementById("edit-modal");
+      const err = document.getElementById("modal-error");
+      return modal.classList.contains("hidden") || !err.classList.contains("hidden");
+    }, null, { timeout: 60000 }).catch(() => {});
+  };
+
   const dialogs = [];
   page.on("dialog", (d) => { dialogs.push(d.message()); d.accept(); }); // a stray alert() must never block the spec — and must be countable
   await page.setViewportSize({ width: 1280, height: 900 });
@@ -113,8 +125,7 @@ async page => {
   await page.waitForTimeout(500);
   const baseCfg = await page.evaluate(() => document.getElementById("modal-textarea").value);
   await page.fill("#modal-textarea", baseCfg + "\npile:999999999 | bogus");
-  await page.locator("#modal-save").click();
-  await page.waitForTimeout(6000);
+  await saveAndSettle();
   const bad = await page.evaluate(() => ({ shown: !document.getElementById("modal-error").classList.contains("hidden"), text: document.getElementById("error-list").textContent }));
   t("editor: a nonexistent pile is rejected", bad.shown && /pile:999999999/.test(bad.text), bad.text.slice(0, 80));
 
@@ -122,8 +133,7 @@ async page => {
   // The pile existence probe is a live request, so allow one retry (a transient
   // network failure legitimately shows the validation error).
   for (let attempt = 0; attempt < 2; attempt++) {
-    await page.locator("#modal-save").click();
-    await page.waitForTimeout(6000);
+    await saveAndSettle();
     if (await page.evaluate(() => document.getElementById("edit-modal").classList.contains("hidden"))) break;
   }
   const good = await page.evaluate(() => {
