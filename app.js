@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.28.2 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.28.3 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.28.2"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.28.3"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -3587,7 +3587,10 @@ function renderViewer(page, info) {
 async function openViewer(title, { push = true } = {}) {
   if (!title) return;
   state.viewerTitle = title;
-  if (push) viewerPushedEntry = true;
+  // Always assign, never only-set-true: a stale flag makes a later close pop an
+  // unrelated history entry (the viewer may have been closed by a navigation
+  // path that skips history.back(), e.g. closeViewerForNavigation above).
+  viewerPushedEntry = !!push;
   writeURL(push ? "push" : "replace");
 
   const modal = $("viewer-modal");
@@ -3630,6 +3633,22 @@ function closeViewer({ fromHistory = false } = {}) {
   if (fromHistory) return;                     // URL already reflects the closed state
   if (viewerPushedEntry) { viewerPushedEntry = false; history.back(); }
   else writeURL("replace");
+}
+
+// Leaving the viewer in order to navigate somewhere else (a category pill inside
+// the viewer's details). closeViewer() pops the viewer's history entry with
+// history.back(), which is ASYNC: it lands after the caller's navigateTo() and
+// restores the pre-viewer URL, silently reverting the jump — issue #35 ("clicking
+// a category in the detail view does nothing, you stay in the deep shuffle you
+// came from"). So skip the pop here and let navigateTo's pushState own the
+// history: the viewer's own entry is rewritten as the destination (replace), and
+// Back then returns to the feed you came from.
+function closeViewerForNavigation() {
+  if ($("viewer-modal").classList.contains("hidden")) return;
+  const wasPushed = viewerPushedEntry;
+  closeViewer({ fromHistory: true }); // hide only — no history side effects
+  viewerPushedEntry = false;
+  if (wasPushed) writeURL("replace"); // drop file= from the current entry
 }
 
 function viewerTitles() {
@@ -3683,7 +3702,7 @@ function installViewerInterception() {
     const pill = e.target.closest("button[data-cat]");
     if (!pill) return;
     const cat = pill.getAttribute("data-cat");
-    closeViewer();
+    closeViewerForNavigation(); // NOT closeViewer(): its history.back() would undo the jump (#35)
     navigateTo(cat, { fresh: true });
   });
   document.addEventListener("keydown", (e) => {

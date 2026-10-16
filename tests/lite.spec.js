@@ -168,7 +168,16 @@ async page => {
   const diffFull = orderBefore.findIndex((t, i) => t !== orderFull[i]);
   t("lite→shuffle: SAME tiles, SAME visual order again", diffFull === -1,
     `first diff at ${diffFull}: ${JSON.stringify((orderBefore[diffFull] || "").slice(5, 40))} → ${JSON.stringify((orderFull[diffFull] || "").slice(5, 40))} (${orderFull.length} vs ${orderBefore.length} tiles)`);
-  t("lite→shuffle: retina candidate returns", await page.evaluate(() => /960w/.test(document.querySelector(".group .media-container img").getAttribute("srcset") || "")));
+  // Wait for tiles before probing srcset, and read null-safely: a batch landing
+  // between the wait above and this line can momentarily leave the grid without a
+  // .group, and a bare querySelector().getAttribute() then THROWS — killing the
+  // whole spec instead of failing one assertion (seen in-suite 2026-10-03).
+  await page.waitForFunction(() => document.querySelectorAll(".group .media-container img").length > 0, null, { timeout: 30000 }).catch(() => {});
+  const retinaSrcset = await page.evaluate(() => {
+    const img = document.querySelector(".group .media-container img");
+    return img ? img.getAttribute("srcset") || "" : "";
+  });
+  t("lite→shuffle: retina candidate returns", /960w/.test(retinaSrcset), retinaSrcset.slice(0, 70));
 
   // Cleanup so other specs start full-quality.
   await page.evaluate(() => localStorage.removeItem("vibe_lite"));

@@ -248,6 +248,51 @@ async page => {
     t("deep link shows the requested file", s.file === openFile, String(s.file).slice(0, 50));
   });
 
+  // ── issue #35: a category pill inside the viewer must MOVE the feed ──────
+  // The viewer's history entry is popped by closeViewer() via history.back() —
+  // asynchronous, so an older build had that pop land AFTER the navigation and
+  // restore the pre-viewer URL, i.e. "clicking a category in the detail view does
+  // nothing, you end up back in the deep shuffle you came from".
+  await step("viewer category pill navigates the feed (issue #35)", async () => {
+    await page.goto(BASE + "/?sort=shuffle&view=det&cat=Category%3AWikiPortraits+uploads&deep=1&size=m&type=all&lite=1", { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".group", { timeout: 60000 });
+    await page.waitForTimeout(2500);
+    const before = await page.evaluate(() => window.__cvState.currentCategory);
+    t("35: deep-shuffle feed loaded", /^Category:/.test(before), before);
+    await page.locator(".group .media-link").first().click();
+    await page.waitForFunction(() => !document.getElementById("viewer-modal").classList.contains("hidden"), null, { timeout: 60000 });
+    await page.waitForFunction(() => document.querySelectorAll("#viewer-details button[data-cat]").length > 0, null, { timeout: 60000 }).catch(() => {});
+    const pills = await page.evaluate(() => [...document.querySelectorAll("#viewer-details button[data-cat]")].map((b) => b.getAttribute("data-cat")));
+    // Prefer a content subcategory of the same series (license/maintenance pills
+    // can be empty or hidden and would make the "feed renders" check meaningless).
+    const target = pills.find((c) => c !== before && /^Category:WikiPortraits /.test(c)) || pills.find((c) => c !== before);
+    if (!target) { t("35: viewer lists an alternative category", false, JSON.stringify(pills.slice(0, 4))); return; }
+    await page.locator("#viewer-details button[data-cat]").nth(pills.indexOf(target)).click();
+    await page.waitForFunction((c) => window.__cvState.currentCategory === c, target, { timeout: 60000 }).catch(() => {});
+    await page.waitForFunction(() => document.querySelectorAll(".group").length > 0, null, { timeout: 60000 }).catch(() => {});
+    const after = await page.evaluate(() => ({
+      cat: window.__cvState.currentCategory,
+      // URLSearchParams writes spaces as "+", which decodeURIComponent leaves alone.
+      urlCat: decodeURIComponent((location.search.match(/[?&]cat=([^&]*)/) || [])[1] || "").replace(/\+/g, " "),
+      open: !document.getElementById("viewer-modal").classList.contains("hidden"),
+      hasFile: location.search.includes("file="),
+      deep: window.__cvState.deepMode,
+      tiles: document.querySelectorAll(".group").length,
+    }));
+    t("35: viewer closes on the jump", after.open === false);
+    t("35: the feed MOVED to the clicked category", after.cat === target && after.urlCat === target, `clicked=${target} cat=${after.cat}`);
+    t("35: URL drops file= (the viewer entry became the new feed)", after.hasFile === false);
+    t("35: deep mode persists into the new feed", after.deep === true, String(after.deep));
+    t("35: the new feed renders tiles", after.tiles > 0, `${after.tiles} tiles`);
+    await page.goBack();
+    await page.waitForTimeout(3500);
+    const back = await page.evaluate(() => ({
+      cat: window.__cvState.currentCategory,
+      open: !document.getElementById("viewer-modal").classList.contains("hidden"),
+    }));
+    t("35: Back returns to the previous feed, not the viewer", back.cat === before && back.open === false, `cat=${back.cat} open=${back.open}`);
+  });
+
   const passed = results.filter((r) => r.startsWith("PASS")).length;
   const summary = `Viewer spec: ${passed} passed, ${failed} failed\n${results.join("\n")}`;
   console.log(summary);
