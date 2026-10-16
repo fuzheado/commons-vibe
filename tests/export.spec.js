@@ -146,6 +146,74 @@ async page => {
   page.off("console", onMsg);
   await page.unroute("**/*");
 
+  // ── 6. "Everything in scope" — tiers 1 + 2 (v1.29) ───────────────────────
+  // Tier 1: clips and list feeds are already in memory → instant, 0 requests.
+  // Tier 2: a category/subtree is enumerated by paging (500 titles a page).
+  // Titles-only output: enumerated records carry title + Commons page URL, and
+  // the JSON envelope says so.
+  const progressText = () => page.evaluate(() => document.getElementById("export-progress-text").textContent);
+  const openExportWithEverything = async (url) => {
+    await page.goto(url, { waitUntil: "domcontentloaded" });
+    await page.waitForSelector(".group", { timeout: 60000 }).catch(() => {});
+    await page.waitForTimeout(1200);
+    await page.locator("#export-btn").click();
+    await page.waitForTimeout(700);
+    const label = await page.evaluate(() => document.getElementById("export-limit-everything").textContent);
+    await page.selectOption("#export-limit", "everything");
+    await page.waitForFunction(() => /files ·/.test(document.getElementById("export-progress-text").textContent), null, { timeout: 60000 }).catch(() => {});
+    return label;
+  };
+
+  await page.evaluate(() => localStorage.setItem("vibe_clips", JSON.stringify(["File:Chop Suey by Edward Hopper.jpg", "File:Example.jpg"])));
+  const clipsLabel = await openExportWithEverything(BASE + "/?clips=1");
+  const clipsRun = await page.evaluate(() => ({
+    progress: document.getElementById("export-progress-text").textContent,
+    download: !document.getElementById("export-download").disabled,
+  }));
+  t("everything: clips scope is enumerated instantly (0 requests)", /^2 files · 0 requests/.test(clipsRun.progress), clipsRun.progress);
+  t("everything: clips option label names the collection", /Everything in your clips \(2\)/.test(clipsLabel), clipsLabel);
+  t("everything: instant enumeration is downloadable", clipsRun.download === true);
+
+  const listLabel = await openExportWithEverything(BASE + "/?pile=116948");
+  const listRun = await progressText();
+  t("everything: a list feed is enumerated instantly (0 requests)", /^2 files · 0 requests/.test(listRun), listRun);
+  t("everything: list option label names the list", /Everything in this list \(2\)/.test(listLabel), listLabel);
+
+  const catLabel = await openExportWithEverything(BASE + "/?cat=Category%3AChop%20Suey");
+  const catRun = await page.evaluate(() => {
+    const r = document.querySelector('input[name="export-format"][value="json"]');
+    r.checked = true;
+    r.dispatchEvent(new Event("change", { bubbles: true }));
+    return { progress: document.getElementById("export-progress-text").textContent, json: document.getElementById("export-preview").textContent.slice(0, 400) };
+  });
+  t("everything: a category is enumerated by paging (≥1 request)", /^2 files · [1-9]\d* request/.test(catRun.progress), catRun.progress);
+  t("everything: category option label is scope-specific", catLabel === "Everything in this category", catLabel);
+  t("everything: JSON marks the export titles-only", /"metadata": "titles-only"/.test(catRun.json), catRun.json.slice(0, 120).replace(/\s+/g, " "));
+  t("everything: enumerated records keep a Commons page URL", /commons\.wikimedia\.org\/wiki\/File%3A/.test(await page.evaluate(() => document.getElementById("export-preview").textContent)), "");
+
+  const deepLabel = await openExportWithEverything(BASE + "/?cat=Category%3AChop%20Suey&deep=1&sort=shuffle");
+  const deepRun = await progressText();
+  t("everything: deep scope label says subtree", deepLabel === "Everything in the subtree", deepLabel);
+  t("everything: deep enumeration walks the tree and pages files", /^2 files · [1-9]\d* request/.test(deepRun), deepRun);
+
+  // Back to a drawn-set limit: the enumeration must not leak into it. Re-select
+  // JSON first — this block ran after a page.goto, which reset the radio to CSV.
+  await page.evaluate(() => {
+    const r = document.querySelector('input[name="export-format"][value="json"]');
+    r.checked = true;
+    r.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  await page.selectOption("#export-limit", "24");
+  await page.waitForTimeout(600);
+  const backToDrawn = await page.evaluate(() => ({
+    metadata: (document.getElementById("export-preview").textContent.match(/"metadata": "([a-z-]+)"/) || [])[1] || "",
+    previewHead: document.getElementById("export-preview").textContent.slice(0, 90).replace(/\s+/g, " "),
+    progressHidden: document.getElementById("export-progress").classList.contains("hidden"),
+  }));
+  t("everything: switching back to a drawn limit hides the enumerator", backToDrawn.progressHidden === true);
+  t("everything: drawn-set JSON is not marked titles-only", backToDrawn.metadata === "full", `${backToDrawn.metadata || "(none)"} — preview: ${backToDrawn.previewHead || ""}`);
+  await page.evaluate(() => localStorage.removeItem("vibe_clips"));
+
   if (failed) throw `${failed} failed\n${results.join("\n")}`;
   console.log(results.join("\n"));
   return `export spec: all ${results.length} assertions pass`;

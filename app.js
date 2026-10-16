@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.28.3 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.29 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.28.3"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.29"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -823,6 +823,179 @@ function toggleClip(title) {
   return added;
 }
 
+/* ---------------- clips list management (v1.29) ----------------
+ * The collection could be built (bookmark button) and emptied one tile at a time
+ * (in-feed unclip) but never seen, edited or reset as a whole. This adds a
+ * manager: the clips feed shows a bar (count · Edit list · Clear all), and the
+ * modal edits the collection as text — one File: title per line.
+ * Hand-adding is validated rather than blocked on trust: titles are normalized
+ * (namespace prefix), de-duplicated, resolved through the API's `normalized` and
+ * `redirects` maps, and checked for existence in batches of 50 (the titles=
+ * limit). Validation is all-or-nothing like the category editor, so a typo never
+ * half-saves. The typed order is preserved — the clips feed renders in it. */
+function syncClipsBar() {
+  const bar = $("clips-bar");
+  if (!bar) return;
+  const inClips = !!(state.list && state.list.source === "clips");
+  bar.classList.toggle("hidden", !inClips);
+  if (!inClips) return;
+  const n = state.clips.length;
+  setText("clips-bar-count", `${n} clip${n === 1 ? "" : "s"}`);
+  const clear = $("clips-bar-clear");
+  if (clear && !clear.dataset.armed) clear.textContent = "Clear all";
+}
+
+function clipsPersist() {
+  try {
+    if (state.clips.length) localStorage.setItem(CLIPS_KEY, JSON.stringify(state.clips));
+    else localStorage.removeItem(CLIPS_KEY);
+  } catch (e) {
+    console.warn("clip save failed:", e);
+  }
+}
+
+// Refresh every rendered clip button (tile footers + viewer) after a bulk change.
+function refreshAllClipButtons() {
+  const done = new Set();
+  for (const btn of document.querySelectorAll(".clip-btn[data-clip-file]")) {
+    const title = btn.getAttribute("data-clip-file");
+    if (done.has(normCat(title))) continue;
+    done.add(normCat(title));
+    updateClipButtons(title);
+  }
+  syncClipChip();
+  syncClipsBar();
+}
+
+let clipsClearTimer = null;
+function armClearClips(button) {
+  if (!button) return;
+  if (clipsClearTimer) { clearTimeout(clipsClearTimer); clipsClearTimer = null; }
+  if (button.dataset.armed) { // second press = do it
+    button.dataset.armed = "";
+    applyClearClips();
+    return;
+  }
+  button.dataset.armed = "1";
+  button.textContent = `Really clear ${state.clips.length}?`;
+  clipsClearTimer = setTimeout(() => {
+    clipsClearTimer = null;
+    button.dataset.armed = "";
+    button.textContent = "Clear all";
+    syncClipsBar();
+  }, 4000);
+}
+
+function applyClearClips() {
+  const n = state.clips.length;
+  state.clips = [];
+  clipsPersist();
+  refreshAllClipButtons();
+  closeClipsEditor();
+  // Stay in the clips feed (empty lists render "End of Collection", like unclipping
+  // the last tile does) rather than teleporting the user somewhere else.
+  if (state.list && state.list.source === "clips") {
+    state.list.titles = [];
+    state.list.cursor = 0;
+    resetAndFetch();
+  }
+  syncClipsBar();
+  console.info(`CommonsVibe: cleared ${n} clip${n === 1 ? "" : "s"}.`);
+}
+
+function openClipsEditor() {
+  const modal = $("clips-modal");
+  if (!modal) return;
+  const ta = $("clips-textarea");
+  if (ta) ta.value = state.clips.join("\n");
+  $("clips-error")?.classList.add("hidden");
+  setText("clips-save-status", state.clips.length ? `${state.clips.length} clip${state.clips.length === 1 ? "" : "s"} saved` : "No clips yet — paste titles, or clip tiles with their bookmark button.");
+  const clear = $("clips-clear");
+  if (clear) { clear.dataset.armed = ""; clear.textContent = "Clear all"; }
+  modal.classList.remove("hidden");
+  ta?.focus();
+}
+
+function closeClipsEditor() {
+  $("clips-modal")?.classList.add("hidden");
+  if (clipsClearTimer) { clearTimeout(clipsClearTimer); clipsClearTimer = null; }
+}
+
+// Resolve one queried title to the canonical existing page title (or null):
+// the API can normalize (underscores/spacing) and follow redirects, and answers
+// with the FINAL titles, so walk both maps before looking the page up.
+function resolveQueriedTitle(query, normalized, redirects) {
+  let t = query;
+  for (let hop = 0; hop < 3; hop++) {
+    const n = normalized.get(normCat(t));
+    const r = redirects.get(normCat(t));
+    if (r) { t = r; continue; }
+    if (n && n !== t) { t = n; continue; }
+    break;
+  }
+  return t;
+}
+
+async function saveClipsFromEditor() {
+  const ta = $("clips-textarea");
+  if (!ta) return;
+  const errorBox = $("clips-error");
+  errorBox?.classList.add("hidden");
+  const lines = ta.value.split("\n").map((l) => l.trim()).filter(Boolean);
+  const wanted = [];
+  const seen = new Set();
+  for (const line of lines) {
+    const title = /^file:/i.test(line) ? "File:" + line.slice(5).trim() : "File:" + line;
+    const key = normCat(title);
+    if (seen.has(key)) continue; // de-dupe silently: the collection is a set
+    seen.add(key);
+    wanted.push(title);
+  }
+  setText("clips-save-status", `Validating ${wanted.length} title${wanted.length === 1 ? "" : "s"}…`);
+  const canonical = [];
+  const bad = [];
+  try {
+    for (let i = 0; i < wanted.length; i += 50) {
+      const chunk = wanted.slice(i, i + 50);
+      const data = await api({ action: "query", titles: chunk.join("|"), redirects: "1" }, { ttl: 10 * 60e3 });
+      const normalized = new Map(((data.query && data.query.normalized) || []).map((r) => [normCat(r.from), r.to]));
+      const redirects = new Map(((data.query && data.query.redirects) || []).map((r) => [normCat(r.from), r.to]));
+      const pages = new Map(((data.query && data.query.pages) || []).map((p) => [normCat(p.title), p]));
+      for (const query of chunk) {
+        const resolved = resolveQueriedTitle(query, normalized, redirects);
+        const page = pages.get(normCat(resolved));
+        if (page && !page.missing) {
+          if (!seen.has(normCat(page.title)) || canonical.every((c) => normCat(c) !== normCat(page.title))) canonical.push(page.title);
+        } else {
+          bad.push(query);
+        }
+      }
+    }
+  } catch (e) {
+    console.warn("clip validation failed:", e);
+    errorBox?.classList.remove("hidden");
+    setText("clips-error-list", `Could not validate: ${e.message}`);
+    setText("clips-save-status", "");
+    return;
+  }
+  if (bad.length) {
+    errorBox?.classList.remove("hidden");
+    setText("clips-error-list", `${bad.length} not found on Commons: ${bad.slice(0, 5).join(", ")}${bad.length > 5 ? ` … and ${bad.length - 5} more` : ""}`);
+    setText("clips-save-status", "Nothing was saved — fix or remove those lines and save again.");
+    return;
+  }
+  state.clips = canonical;
+  clipsPersist();
+  refreshAllClipButtons();
+  if (state.list && state.list.source === "clips") {
+    state.list.titles = [...state.clips];
+    state.list.cursor = 0;
+    resetAndFetch();
+  }
+  closeClipsEditor();
+  console.info(`CommonsVibe: clips saved (${canonical.length} title${canonical.length === 1 ? "" : "s"}).`);
+}
+
 function removeClipCard(title) {
   const L = state.list;
   if (!L || L.source !== "clips") return;
@@ -919,7 +1092,129 @@ function csvCell(v) {
   return /[",\n]/.test(s) ? `"${s.replaceAll('"', '""')}"` : s;
 }
 
-function formatExport(files, fmt) {
+/* ---------------- export "everything" (v1.29, tier 1 + 2) ----------------
+ * "Everything drawn" (limit=all) exports the tiles this session rendered.
+ * "Everything in scope" (limit=everything) enumerates the WHOLE scope instead:
+ *   - clips / list feeds: already in memory — instant, zero API calls.
+ *   - category (alpha): list=categorymembers paging at cmlimit=500.
+ *   - deep (shuffle OR browse): the subtree — walk the category tree and page
+ *     every category's files.
+ * Cost, measured 2026-10-16: ~290 ms per 500-title page, so the 132k-file WLM
+ * 2026 root is ~265 calls ≈ 76 s of network (plus the app's 150 ms throttle and
+ * one subcategory listing per category for deep). CirrusSearch cannot shortcut
+ * this: deepcategory paging dies at sroffset=10000 ("up to 10000 search results
+ * are supported") and deepcategory answers 0 for container categories (v1.28.2).
+ * TITLES ONLY: metadata for 130k files would be ~2,600 further imageinfo calls,
+ * so enumerated exports carry the title plus a derived page URL, and the JSON
+ * envelope is marked "titles-only". Deduped by normalized title — cross-listing
+ * means memberships outnumber unique files.
+ * Cancellable and budgeted; progress is reported per page. */
+const EXPORT_ENUM_MAX_FILES = 250000;   // safety cap: report truncation, never hang
+const EXPORT_ENUM_MAX_CATS = 2000;      // deep walk budget (browse uses 500)
+
+const titleRecord = (title) => ({
+  title,
+  description: "",
+  categories: [],
+  fileUrl: "",
+  pageUrl: `https://commons.wikimedia.org/wiki/${quotePath(title)}`,
+  thumbUrl: "",
+  width: null,
+  height: null,
+  bytes: null,
+  mime: "",
+  mediatype: "",
+});
+
+// Enumerate the whole scope. Returns { titles, requests, truncated, canceled }.
+async function enumerateExportTitles({ onProgress, shouldStop }) {
+  const titles = [];
+  const seen = new Set();
+  let requests = 0;
+  let truncated = false;
+  let canceled = false;
+  const add = (t) => {
+    const key = normCat(t);
+    if (seen.has(key)) return;
+    seen.add(key);
+    titles.push(t);
+  };
+  const tick = (label) => { if (onProgress) onProgress({ files: titles.length, requests, label }); };
+  const stop = () => !!(shouldStop && shouldStop()) || titles.length >= EXPORT_ENUM_MAX_FILES;
+
+  // Tier 1 — clips and list feeds are already fully in memory.
+  if (exportScope === "clips") {
+    state.clips.forEach(add);
+    tick("clips collection");
+    return { titles, requests, truncated: false, canceled: false };
+  }
+  if (state.list) {
+    state.list.titles.forEach(add);
+    tick(listRefLabel(state.list));
+    return { titles, requests, truncated: false, canceled: false };
+  }
+
+  // One page of a category's files (500 is the API maximum for users).
+  const pageCategory = async (cat, cont) => {
+    const params = { action: "query", list: "categorymembers", cmtitle: cat, cmtype: "file", cmlimit: "500" };
+    if (cont) params.cmcontinue = cont;
+    requests++;
+    const data = await api(params, { ttl: 24 * 3600e3 });
+    for (const m of (data.query && data.query.categorymembers) || []) add(m.title);
+    return (data.continue && data.continue.cmcontinue) || null;
+  };
+
+  if (!state.deepMode) {
+    // Tier 2a — a single category, paged.
+    let cont = null;
+    do {
+      cont = await pageCategory(state.currentCategory, cont);
+      tick(state.currentCategory);
+      if (stop()) { truncated = titles.length >= EXPORT_ENUM_MAX_FILES; break; }
+    } while (cont);
+    return { titles, requests, truncated, canceled };
+  }
+
+  // Tier 2b — the subtree: DFS with a budget, paging each category's files.
+  // Same order as serial deep browse (subcategories before the category's own
+  // files), but here nothing is rendered: the export is the destination.
+  const seenCats = new Set();
+  const stack = [{ cat: state.currentCategory, files: false }];
+  let cats = 0;
+  while (stack.length && !canceled && !truncated) {
+    if (shouldStop && shouldStop()) { canceled = true; break; }
+    const item = stack.pop();
+    if (item.files) {
+      let cont = null;
+      do {
+        cont = await pageCategory(item.cat, cont);
+        tick(item.cat);
+        if (stop()) { truncated = titles.length >= EXPORT_ENUM_MAX_FILES; break; }
+      } while (cont && !(shouldStop && shouldStop()));
+      continue;
+    }
+    if (seenCats.has(normCat(item.cat))) continue;
+    seenCats.add(normCat(item.cat));
+    if (cats++ < EXPORT_ENUM_MAX_CATS) {
+      let children = [];
+      try {
+        children = await buildTreeLevel(item.cat);
+      } catch (e) {
+        console.warn("export enumerate: expand failed", item.cat, e.message);
+      }
+      stack.push({ cat: item.cat, files: true }); // own files last
+      for (let i = children.length - 1; i >= 0; i--) {
+        if (!seenCats.has(normCat(children[i].title))) stack.push({ cat: children[i].title, files: false });
+      }
+    } else {
+      stack.push({ cat: item.cat, files: true });
+    }
+  }
+  if (shouldStop && shouldStop()) canceled = true;
+  return { titles, requests, truncated, canceled };
+}
+
+function formatExport(files, fmt, { titlesOnly = false } = {}) {
   if (fmt === "txt") return files.map((f) => f.title).join("\n") + "\n";
   if (fmt === "csv") {
     const head = "title,description,categories,media_type,width,height,bytes,mime,file_url,page_url,thumb_url";
@@ -937,6 +1232,9 @@ function formatExport(files, fmt) {
       exported: new Date().toISOString(),
       scope: exportScope,
       source: exportSourceLabel(),
+      // "full" = per-file metadata as fetched; "titles-only" = enumerated list
+      // (title + page URL), see enumerateExportTitles (v1.29).
+      metadata: titlesOnly ? "titles-only" : "full",
       count: files.length,
       files,
     }, null, 2);
@@ -945,7 +1243,8 @@ function formatExport(files, fmt) {
     // Captions are description-only by default; artist/license attribution is
     // the enriched pass (phase 2) — the feed trim does not carry them.
     const cap = (s) => String(s || "").replace(/[|\n\r]/g, " ").trim();
-    const body = files.map((f) => `${f.title}|${cap(f.description)}`).join("\n");
+    // Titles-only records have no caption: emit the bare title, not "File:X|".
+    const body = files.map((f) => (f.description ? `${f.title}|${cap(f.description)}` : f.title)).join("\n");
     return `<gallery mode="packed" caption="${cap(exportSourceLabel())} — via CommonsVibe">\n${body}\n</gallery>\n`;
   }
   return "";
@@ -1021,16 +1320,98 @@ function handleExportPileOpen() {
 const EXPORT_MIME = { json: "application/json", csv: "text/csv", txt: "text/plain", wiki: "text/plain" };
 const EXPORT_EXT = { json: "json", csv: "csv", txt: "txt", wiki: "wiki" };
 
+let exportFull = null;      // { records, requests, truncated, canceled } for "everything"
+let exportEnumToken = null; // identity of the in-flight enumeration (cancel = clear it)
+
 function exportSelection() {
-  const files = exportData ? exportData.files : [];
   const lim = $("export-limit").value;
+  const fmt = document.querySelector('input[name="export-format"]:checked').value;
+  if (lim === "everything") {
+    return { files: exportFull ? exportFull.records : [], fmt, titlesOnly: true, ready: !!exportFull, lim };
+  }
+  const files = exportData ? exportData.files : [];
   const out = lim === "all" ? files : files.slice(0, Number(lim) || files.length);
-  return { files: out, fmt: document.querySelector('input[name="export-format"]:checked').value };
+  return { files: out, fmt, titlesOnly: false, ready: true, lim };
+}
+
+// "Everything" means something concrete per scope; say it.
+function updateEverythingLabel() {
+  const opt = $("export-limit-everything");
+  if (!opt) return;
+  const n = (v) => (v ? ` (${v.toLocaleString("en-US")})` : "");
+  // Clips first: a clips FEED is also state.list, but "your clips" is the right
+  // wording whether the scope is the clips radio or the feed showing them.
+  const clipsScope = exportScope === "clips" || (state.list && state.list.source === "clips");
+  opt.textContent = clipsScope
+    ? `Everything in your clips${n(state.clips.length)}`
+    : state.list
+      ? `Everything in this list${n(state.list.titles.length)}`
+      : state.deepMode
+        ? "Everything in the subtree"
+        : "Everything in this category";
+}
+
+function setExportProgress(message, visible) {
+  const row = $("export-progress");
+  if (!row) return;
+  if (visible === true) { row.classList.remove("hidden"); row.classList.add("flex"); }
+  if (visible === false) row.classList.add("hidden");
+  if (message != null) setText("export-progress-text", message);
+}
+
+async function prepareEverything() {
+  const token = {};
+  exportEnumToken = token;
+  exportFull = null;
+  updateExportPreview();
+  setExportProgress("Enumerating…", true);
+  let res;
+  try {
+    res = await enumerateExportTitles({
+      shouldStop: () => exportEnumToken !== token,
+      onProgress: ({ files, requests, label }) => {
+        if (exportEnumToken !== token) return;
+        const where = label ? ` · ${String(label).replace(/^Category:/, "").slice(0, 30)}` : "";
+        setExportProgress(`Enumerating… ${files.toLocaleString("en-US")} files · ${requests} request${requests === 1 ? "" : "s"}${where}`);
+      },
+    });
+  } catch (e) {
+    console.warn("export enumeration failed:", e);
+    if (exportEnumToken === token) { exportEnumToken = null; setExportProgress(`Enumeration failed: ${e.message}`); }
+    return;
+  }
+  if (exportEnumToken === token) exportEnumToken = null; // finished on its own
+  exportFull = { records: res.titles.map(titleRecord), requests: res.requests, truncated: res.truncated, canceled: res.canceled };
+  const bits = [`${res.titles.length.toLocaleString("en-US")} files`, `${res.requests} request${res.requests === 1 ? "" : "s"}`];
+  if (res.canceled) bits.push("canceled — partial list");
+  if (res.truncated) bits.push("TRUNCATED at the safety cap");
+  setExportProgress(bits.join(" · "));
+  updateExportPreview();
+  setTimeout(() => { if (!exportEnumToken) setExportProgress(null, false); }, 5000);
+}
+
+function cancelExportEnumeration() {
+  if (!exportEnumToken) return;
+  exportEnumToken = null; // enumerateExportTitles' shouldStop() now returns true
+  setExportProgress("Canceling… — the files enumerated so far are kept");
 }
 
 function updateExportPreview() {
-  const { files, fmt } = exportSelection();
-  const text = formatExport(files, fmt);
+  const { files, fmt, titlesOnly, ready, lim } = exportSelection();
+  const note = $("export-note");
+  if (note) {
+    note.textContent = lim === "everything"
+      ? "Everything in scope: titles and Commons page links only (per-file metadata is fetched for drawn tiles, not for large enumerations). Large scopes take minutes and can be canceled."
+      : note.textContent.replace(/^Everything in scope.*$/, "");
+  }
+  if (!ready) {
+    const pre0 = $("export-preview");
+    pre0.textContent = "Enumerating the whole scope… (Cancel to stop — or choose “Everything drawn” for what is already on screen.)";
+    $("export-download").disabled = true;
+    $("export-copy").disabled = true;
+    return;
+  }
+  const text = formatExport(files, fmt, { titlesOnly });
   const pre = $("export-preview");
   const MAX = 3000;
   pre.textContent = text.length > MAX
@@ -1042,6 +1423,11 @@ function updateExportPreview() {
 
 async function refreshExportScope(scope) {
   exportScope = scope;
+  // An enumeration belongs to the scope it was made from (v1.29).
+  exportEnumToken = null;
+  exportFull = null;
+  setExportProgress(null, false);
+  updateEverythingLabel();
   // A pile result belongs to the selection it was created from (v1.28).
   lastPileId = null;
   const panel = $("export-pile-result");
@@ -1069,6 +1455,7 @@ async function refreshExportScope(scope) {
 }
 
 function openExportModal() {
+  updateEverythingLabel();
   $("export-modal").classList.remove("hidden");
   $("export-feed-count").textContent = `(${state.feedPages.length} drawn)`;
   $("export-clips-count").textContent = `(${state.clips.length})`;
@@ -1084,8 +1471,8 @@ function closeExportModal() {
 }
 
 function handleExportCopy() {
-  const { files, fmt } = exportSelection();
-  const text = formatExport(files, fmt);
+  const { files, fmt, titlesOnly } = exportSelection();
+  const text = formatExport(files, fmt, { titlesOnly });
   navigator.clipboard.writeText(text).then(
     () => { $("export-copy").textContent = "Copied ✓"; setTimeout(() => { $("export-copy").textContent = "Copy"; }, 1500); },
     (e) => console.warn("clipboard failed:", e),
@@ -1093,9 +1480,9 @@ function handleExportCopy() {
 }
 
 function handleExportDownload() {
-  const { files, fmt } = exportSelection();
+  const { files, fmt, titlesOnly } = exportSelection();
   if (!files.length) return;
-  const text = formatExport(files, fmt);
+  const text = formatExport(files, fmt, { titlesOnly });
   const blob = new Blob([text], { type: `${EXPORT_MIME[fmt]};charset=utf-8` });
   const a = document.createElement("a");
   const src = exportSourceLabel().replace(/^Category:/, "").replace(/[^\w.-]+/g, "_").slice(0, 40);
@@ -3097,6 +3484,7 @@ function resetAndFetch() {
   $("sort-pill").classList.toggle("hidden", !!state.list); // Alpha/Shuffle N/A for lists
   syncDeepUI(); // banner text tracks the new category when deep stays on
   syncListUI(); // the tree browser is category-only (v1.28)
+  syncClipsBar(); // clips manager bar is clips-feed only (v1.29)
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
@@ -4117,7 +4505,22 @@ async function init() {
   for (const radio of document.querySelectorAll('input[name="export-format"]')) {
     radio.addEventListener("change", updateExportPreview);
   }
-  wire("export-limit", "change", updateExportPreview);
+  wire("export-limit", "change", () => {
+    if ($("export-limit").value === "everything") prepareEverything();
+    else { exportEnumToken = null; exportFull = null; setExportProgress(null, false); updateExportPreview(); }
+  });
+  wire("export-progress-cancel", "click", cancelExportEnumeration);
+  wire("clips-bar-edit", "click", openClipsEditor);
+  wire("clips-bar-clear", "click", (e) => armClearClips(e.currentTarget));
+  wire("clips-clear", "click", (e) => armClearClips(e.currentTarget));
+  wire("clips-cancel", "click", closeClipsEditor);
+  wire("clips-save", "click", saveClipsFromEditor);
+  wire("clips-modal", "click", (e) => { if (e.target === $("clips-modal")) closeClipsEditor(); });
+  document.addEventListener("keydown", (e) => {
+    const modal = $("clips-modal");
+    if (!modal || modal.classList.contains("hidden")) return;
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); closeClipsEditor(); }
+  }, true);
   wire("export-modal", "click", (e) => {
     if (e.target === $("export-modal")) closeExportModal();
   });

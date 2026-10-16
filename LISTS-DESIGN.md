@@ -142,8 +142,9 @@ ingestion serves file-based workflows.
 | Phase | Scope | State |
 |---|---|---|
 | **v1.28** | Prefix entry (`pile:`/`psid:`/`pet:` + URLs + numeric hint) in the Jump box; saved lists in `vibe_config` rendered as a **Lists** group; the four leaks fixed; **Create PagePile** in the export dialog with a result panel (`?pile=` link back) | shipped |
-| **v1.29** | Ingestion (JSON/CSV/text/drop) with count feedback; list health (missing members); `?list=local:<id>`; publish-to-share nudge — issue #33 | open |
-| **v1.30** | Lists as first-class: shuffle/sort *within* a fixed set, entry removal, Lists manager panel, visible mode badge in the header | open |
+| **v1.29** | Shipped a related slice: **export "Everything in scope"** (enumerate a whole category/subtree — or the full clips/list set, which is instant) and a **clips manager** (edit the collection as validated text, two-step clear-all). See HANDOFF. The ingestion work below is still open | partial |
+| **v1.30** | Ingestion (JSON/CSV/text/drop) with count feedback; list health (missing members); `?list=local:<id>`; publish-to-share nudge — issue #33 | open |
+| **v1.31** | Lists as first-class: shuffle/sort *within* a fixed set, entry removal, Lists manager panel, visible mode badge in the header | open |
 
 ## 6. Open questions
 

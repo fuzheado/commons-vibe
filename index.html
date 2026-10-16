@@ -102,6 +102,7 @@
                             <option value="100">First 100</option>
                             <option value="500">First 500</option>
                             <option value="all">Everything drawn</option>
+                            <option id="export-limit-everything" value="everything">Everything in scope</option>
                         </select>
                     </label>
                     <div class="flex gap-4">
@@ -120,6 +121,10 @@
                     </div>
                 </div>
                 <p id="export-note" class="text-[10px] text-zinc-500 leading-relaxed"></p>
+                <div id="export-progress" class="hidden items-center gap-3">
+                    <span id="export-progress-text" class="text-[10px] text-purple-300 font-mono"></span>
+                    <button id="export-progress-cancel" class="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-white border border-zinc-700 hover:border-zinc-500 rounded-lg px-2.5 py-1 transition-colors">Cancel</button>
+                </div>
                 <pre id="export-preview" class="bg-black text-zinc-400 font-mono text-[10px] leading-relaxed p-4 border border-zinc-800 rounded-xl overflow-auto max-h-64 whitespace-pre-wrap break-all"></pre>
                 <div id="export-pile-result" class="hidden bg-purple-950/30 border border-purple-800/50 rounded-xl p-3 flex flex-col gap-1.5">
                     <p class="text-[10px] text-purple-200 font-bold uppercase tracking-widest">PagePile <span id="export-pile-id" class="text-white"></span> created — <span id="export-pile-count"></span></p>
@@ -138,6 +143,27 @@
                 <button id="export-copy" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-300 bg-zinc-800 hover:bg-zinc-700 rounded-lg transition-colors">Copy</button>
                 <button id="export-download" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-white bg-blue-600 hover:bg-blue-500 rounded-lg transition-colors">Download</button>
                 <button id="export-print" class="px-4 py-2 text-xs font-bold uppercase tracking-widest text-zinc-300 bg-zinc-800 hover:bg-purple-600 rounded-lg transition-colors" title="Opens the browser print dialog — save as PDF there">PDF / Print</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="clips-modal" class="fixed inset-0 z-[100] modal-overlay hidden flex items-center justify-center p-4">
+        <div class="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
+            <h2 class="text-lg font-bold text-white mb-2 uppercase tracking-tighter">Your Clips</h2>
+            <div class="flex-1 flex flex-col min-h-0">
+                <p class="text-[10px] text-zinc-500 mb-3 uppercase tracking-widest">One <code class="text-blue-400">File:</code> title per line — validated on save. The order here is the order the feed shows. Tiles can also be removed individually with their bookmark button.</p>
+                <textarea id="clips-textarea" class="w-full flex-1 bg-black text-zinc-300 font-mono text-xs p-4 border border-zinc-800 rounded-xl focus:border-blue-500 outline-none mb-3 resize-none" rows="14" spellcheck="false"></textarea>
+                <div id="clips-error" class="hidden bg-red-900/20 border border-red-500/50 rounded-lg p-3 mb-3">
+                    <p class="text-xs text-red-400 font-bold uppercase tracking-wider mb-1">Not saved</p>
+                    <p id="clips-error-list" class="text-[10px] text-red-300 leading-tight"></p>
+                </div>
+                <p id="clips-save-status" class="text-[10px] text-zinc-500 mb-3"></p>
+            </div>
+            <div class="pt-3 border-t border-zinc-800 flex items-center gap-3">
+                <button id="clips-clear" class="text-[10px] font-black uppercase tracking-widest text-zinc-400 hover:text-red-300 border border-zinc-700 hover:border-red-500/60 rounded-lg px-3 py-2 transition-colors">Clear all</button>
+                <span class="flex-1"></span>
+                <button id="clips-cancel" class="px-5 py-2 text-xs font-bold uppercase tracking-widest text-zinc-500 hover:text-white transition-colors">Cancel</button>
+                <button id="clips-save" class="px-5 py-2 bg-blue-600 text-white text-xs font-bold uppercase tracking-widest rounded-lg hover:bg-blue-500 transition-colors">Validate &amp; save</button>
             </div>
         </div>
     </div>
@@ -165,7 +191,7 @@
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span id="app-version">v1.28.3</span>
+                    <span id="app-version">v1.29</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>
@@ -277,6 +303,13 @@
         <div id="deep-banner" class="hidden mb-4 flex items-center justify-between gap-4 bg-purple-950/40 border border-purple-800/60 rounded-xl px-4 py-2.5">
             <p class="text-[10px] text-purple-300 font-bold uppercase tracking-widest"><span id="deep-banner-lead">🌳 Deep shuffle — sampling</span> <span id="deep-banner-cat" class="text-white"></span> <span id="deep-banner-tail">and all its subcategories</span><span id="deep-banner-count" class="text-purple-200/70"></span></p>
             <button id="deep-banner-off" class="text-[9px] font-black uppercase tracking-widest text-purple-400 hover:text-white border border-purple-700 hover:border-purple-400 rounded-lg px-3 py-1.5 transition-colors shrink-0" title="Return to plain shuffle (this category only)">Turn Off</button>
+        </div>
+        <div id="clips-bar" class="hidden mb-4 flex items-center justify-between gap-4 bg-blue-950/40 border border-blue-800/60 rounded-xl px-4 py-2.5">
+            <p class="text-[10px] text-blue-200 font-bold uppercase tracking-widest">🔖 <span id="clips-bar-count" class="text-white"></span> in your collection</p>
+            <div class="flex items-center gap-2 shrink-0">
+                <button id="clips-bar-edit" class="text-[9px] font-black uppercase tracking-widest text-blue-200 hover:text-white border border-blue-700 hover:border-blue-400 rounded-lg px-3 py-1.5 transition-colors" title="See and edit the collection as a list of File: titles">✎ Edit list</button>
+                <button id="clips-bar-clear" class="text-[9px] font-black uppercase tracking-widest text-blue-300/80 hover:text-white border border-blue-800 hover:border-red-500/70 hover:text-red-200 rounded-lg px-3 py-1.5 transition-colors" title="Remove every clip (asks once — unclip single tiles with their bookmark button instead)">Clear all</button>
+            </div>
         </div>
         <div id="treebar" class="hidden mb-6 flex flex-col gap-2">
             <div class="flex flex-wrap items-center gap-2">

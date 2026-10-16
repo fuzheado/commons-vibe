@@ -9,7 +9,46 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-03, v1.28.3 shipped with this commit; v1.15–v1.28.2 deployed)
+## Current state (updated 2026-10-16, v1.29 shipped with this commit; v1.15–v1.28.3 deployed)
+
+- **2026-10-16 — export "Everything in scope", and a clips manager (v1.29).**
+  Two things: the export dialog could only ever give you the tiles that had been
+  rendered, and the clip collection could be built and emptied one item at a time
+  but never seen, edited or reset.
+  **Export "Everything in scope"** (new limit option, separate from "Everything
+  drawn"): enumerates the whole scope instead of what is on screen.
+  *clips and list feeds* are already in memory — instant, **0 API calls**. A
+  *category* is paged with `cmlimit=500`; a *deep* scope walks the tree and pages
+  every category (the walker shares the v1.27 serial traversal: subcategories
+  first, own files last, cycle-guarded, 2000-category budget). Measured
+  2026-10-16: **~290 ms per 500-title page**, so the 132k-file WLM 2026 root is
+  ~265 calls ≈ 76 s of network; a real subtree run (WikiPortraits in New York
+  City, 2,051 files) finished in **8 requests** because pages hold 500 titles.
+  CirrusSearch cannot shortcut this — `deepcategory` paging dies at
+  `sroffset=10000` (measured: "up to 10000 search results are supported") and
+  answers 0 for container categories (v1.28.2).
+  Enumerated exports are **titles-only** (title + derived Commons page URL; the
+  JSON envelope says `"metadata": "titles-only"`, and wiki galleries omit the
+  empty caption pipe) — metadata for 130k files would be ~2,600 further
+  `imageinfo` calls. Progress + **Cancel** (partial results are kept), a
+  250,000-file safety cap with an explicit truncation notice, and dedupe by
+  normalized title (cross-listing means memberships outnumber files). The option
+  label names the concrete scope ("Everything in your clips (2)", "Everything in
+  this list (12,345)", "Everything in the subtree"). Publishing that selection as
+  a PagePile works unchanged — whole subtree → pile in two clicks.
+  **Clips manager:** the clips feed shows a bar (`N clips · ✎ Edit list · Clear
+  all`); the editor lists the collection as `File:` titles with **validation on
+  save** (batched 50, `normalized` + `redirects` resolved, all-or-nothing like the
+  category editor, unknown files named in the error), preserves the typed order,
+  and adds the `File:` prefix for bare titles. "Clear all" is a two-step confirm
+  (no `alert()`), empties storage and leaves the feed at "End of Collection"
+  where the collection can be pasted back in. Hand-adding is therefore supported —
+  the validation the user asked about is the same batched `titles=` check the
+  category editor already used.
+  Regression: `tests/export.spec.js` (38 assertions) and `tests/clips.spec.js`
+  (31 assertions). Remaining from the design doc: list health, `?list=local:` and
+  file-based ingestion (#33), plus the PetScan handoff for giant subtrees
+  (#30 phase 4).
 
 - **2026-10-03 — a category pill inside the viewer reverted the navigation (v1.28.3, issue #35).**
   Reported: in deep shuffle, clicking a tile → the viewer → a category name in the
@@ -555,7 +594,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (19 assertions, v1.18 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (25 assertions, v1.22 + v1.25 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch + stale-page resilience: the feed survives a pre-v1.22 cached page, warns, and reloads at most once), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (13 assertions, v1.26 + v1.28.2 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), and "a zero prints nothing"; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (31 assertions, v1.18 + v1.29 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip, plus the clips manager: bar, editor round-trip, rejection of unknown files, typed order, and the two-step clear-all), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (38 assertions, v1.22 + v1.25 + v1.29 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch, stale-page resilience (the feed survives a pre-v1.22 cached page, warns, reloads at most once), and "Everything in scope": instant for clips/lists, paged for a category, tree-walked for deep, titles-only envelope, and no leakage back into drawn-set exports), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (13 assertions, v1.26 + v1.28.2 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), and "a zero prints nothing"; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -759,6 +798,13 @@ python3 -m http.server 8123        # any static server works; no build step
     1h, hidden on failure. `api()` gains a `detach: true` option so this
     request survives feed aborts. Automated: `tests/deep-banner.spec.js`
     (10 assertions).
+34. Export "Everything in scope" + clips manager (v1.29): the export limit list gains
+    a scope-wide enumeration ("Everything in scope" beside "Everything drawn") —
+    instant for clips/list feeds, paged for a category, tree-walked for deep, with
+    progress, Cancel, dedupe and a titles-only envelope; and the clip collection
+    gets a manager (bar in the clips feed, text editor with validation on save,
+    typed order, two-step clear-all). Automated: `tests/export.spec.js` (38) and
+    `tests/clips.spec.js` (31).
 33. Lists v1.28 (LISTS-DESIGN.md phase 1): list references entered in the Jump box
     (`pile:`/`psid:`/`pet:`, pasted URLs, numeric-hint row), saved as pointers in
     `vibe_config`, rendered as a **Lists** group beside **Categories** in the source
