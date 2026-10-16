@@ -9,7 +9,19 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-03, v1.28 shipped with this commit; v1.15–v1.27.2 deployed)
+## Current state (updated 2026-10-03, v1.28.1 shipped with this commit; v1.15–v1.28 deployed)
+
+- **2026-10-03 — export dialog: Create PagePile joins the action row (v1.28.1).**
+  v1.28 put the publish block between the note and the preview, so "Create
+  PagePile" floated in a bordered section of its own and pushed the preview (the
+  dialog's primary output) to the bottom, away from the other final actions.
+  Reported as odd placement; no good reason for it. Now: body order is
+  scope → limit/format → note → **preview** → (pile result panel, hidden until a
+  pile exists), and the footer is one action row — **Create PagePile** (purple,
+  it publishes publicly) · Copy · Download · PDF/Print, with a status slot at the
+  far left for "Publishing N files…" / "PagePile creation failed: …". The
+  "public and static" caution stays inside the result panel. Markup-only change;
+  `tests/export.spec.js` and `tests/lists.spec.js` cover the ids unchanged.
 
 - **2026-10-03 — Lists v1.28: reference entry, saved lists, and PagePile publishing.**
   First phase of [`LISTS-DESIGN.md`](LISTS-DESIGN.md) (the design doc for arbitrary
