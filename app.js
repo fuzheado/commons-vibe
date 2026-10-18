@@ -1,5 +1,5 @@
-/* CommonsVibe — vanilla JS engine (v1.30 — bump the VERSION const below, not this line)
- * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
+/* CommonsVibe — vanilla JS engine (v1.31 — bump the VERSION const below, not this line)
+ * Category tree (v1.6): tree modal (depth 1–8 or "Fully", lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
  * Tile size control (v1.8): S/M/L density, shortest-column placement, full
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.30"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.31"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -60,7 +60,7 @@ const state = {
   deepSerial: null,              // serial subtree-walk cursor (v1.27, deep+alpha)
   deepCountDone: null,           // set when the banner's subtree count settles (spec/debug hook)
   treeOpen: false,               // tree modal visibility (URL param tree=1)
-  treeDepth: 2,                  // tree modal depth 1–5 (URL param depth=N)
+  treeDepth: 2,                  // tree modal eager depth 1–8, or TREE_FULL_DEPTH (URL param depth=N|max)
   size: "m",                     // tile density s|m|l (URL param size=)
   type: "all",                   // media filter all|image|video|audio|3d (URL param type=)
   lastDeepPicks: new Set(),      // categories used by the previous deep batch
@@ -263,22 +263,31 @@ function saveConfig() {
 
 /* ---------------- header / URL state ---------------- */
 
+// Token guard (v1.31): the categoryinfo call is async, so a lookup started for the
+// PREVIOUS feed can land after the next one has already written the badge — the
+// lists spec caught it as an intermittent "count badge shows the list length"
+// failure (a stale category count overwriting the list's length). Only the newest
+// call may write, and never while a list owns the badge.
+let catInfoToken = 0;
 async function fetchCategoryInfo() {
+  const token = ++catInfoToken;
   if (state.list) {
     $("cat-count").textContent = state.list.titles.length.toLocaleString("en-US");
     return;
   }
+  const wantedCat = state.currentCategory;
   try {
     const data = await api(
-      { action: "query", titles: state.currentCategory, prop: "categoryinfo" },
+      { action: "query", titles: wantedCat, prop: "categoryinfo" },
       { ttl: 7 * 24 * 3600e3 },
     );
+    if (token !== catInfoToken || state.list || state.currentCategory !== wantedCat) return; // superseded
     const page = (data.query.pages || [])[0];
     const files = (page && page.categoryinfo ? page.categoryinfo.files : 0) || 0;
     $("cat-count").textContent = files.toLocaleString("en-US");
   } catch (e) {
     console.warn("categoryinfo failed:", e);
-    $("cat-count").textContent = "0";
+    if (token === catInfoToken && !state.list) $("cat-count").textContent = "0";
   }
 }
 
@@ -316,7 +325,7 @@ function writeURL(mode) {
   }
   if (state.treeOpen) {
     params.set("tree", "1");
-    params.set("depth", String(state.treeDepth));
+    params.set("depth", state.treeDepth === TREE_FULL_DEPTH ? "max" : String(state.treeDepth));
   }
   if (state.viewerTitle) params.set("file", state.viewerTitle);
   if (state.lite) params.set("lite", "1");
@@ -2868,6 +2877,15 @@ function buildCard(page) {
 /* ---------------- tree UI (treebar + tree modal) ---------------- */
 
 let treeCap = 500; // tree modal node budget; user can extend via Load More
+// Eager-expansion depth (v1.31). The node budget — not this number — is the real
+// bound: measured 2026-10-18 on Category:Wiki Loves Monuments 2026, depth 5 and an
+// injected depth 8 rendered exactly the same 200 nodes (budget reached) in the
+// same 64 API calls / 13.5 s, because one categorymembers call returns 500 titles
+// for a whole level. So the ceiling is a UX knob, and "Fully" simply lets the
+// budget be the one that stops the walk (levels ≈ 99 is just "no depth limit";
+// the cycle guard + ctx.max guarantee termination).
+const TREE_DEPTH_MAX = 8;
+const TREE_FULL_DEPTH = 99; // select value "max" — expand until the budget stops us
 let treeReqId = 0; // bumped by resetAndFetch so stale tree renders bail out
 
 function treeChipHTML(catTitle, { hidden = false, count = null } = {}) {
@@ -3011,7 +3029,7 @@ function closeTreeModal() {
 
 async function openTreeModal() {
   state.treeOpen = true;
-  $("tree-depth").value = String(state.treeDepth);
+  syncTreeDepthSelect(); // 99 must render as "max", never as String(99) → "" (v1.31)
   $("tree-filter").value = ""; // fresh view each open
   $("tree-filter-count").classList.add("hidden");
   $("tree-modal").classList.remove("hidden");
@@ -3019,15 +3037,51 @@ async function openTreeModal() {
   loadTree();
 }
 
+// The <select> speaks "1".."8" | "max"; state speaks 1..8 | TREE_FULL_DEPTH.
+// Both directions are tolerant of a stale page missing the element (v1.25).
+function treeDepthFromSelect() {
+  const sel = $("tree-depth");
+  if (!sel) return state.treeDepth || 2;
+  if (sel.value === "max") return TREE_FULL_DEPTH;
+  const n = parseInt(sel.value, 10);
+  return n >= 1 ? Math.min(n, TREE_DEPTH_MAX) : 2;
+}
+
+function treeDepthOption(depth) {
+  if (depth === TREE_FULL_DEPTH) return "max";
+  const n = parseInt(depth, 10) || 2;
+  return String(Math.min(Math.max(n, 1), TREE_DEPTH_MAX));
+}
+
+function syncTreeDepthSelect() {
+  const sel = $("tree-depth");
+  if (sel) sel.value = treeDepthOption(state.treeDepth);
+  syncTreeDepthNote();
+}
+
+// Honesty about what each path can reach: the search index stops expanding at ~5
+// levels (and 256 categories), while the walker follows the category graph for as
+// long as the budget allows. Only worth saying once the user asks for depth the
+// shuffle cannot mirror.
+function syncTreeDepthNote() {
+  const note = $("tree-depth-note");
+  if (!note) return;
+  const d = state.treeDepth;
+  note.textContent = d === TREE_FULL_DEPTH || d > 5
+    ? " · This depth is browsable; subtree shuffle samples ~5 levels."
+    : "";
+}
+
 function handleDepthChange() {
-  state.treeDepth = parseInt($("tree-depth").value, 10) || 2;
+  state.treeDepth = treeDepthFromSelect();
+  syncTreeDepthNote();
   loadTree();
   updateURL();
 }
 
 async function loadTree() {
   const reqId = ++treeReqId;
-  const depth = parseInt($("tree-depth").value, 10) || 2;
+  const depth = treeDepthFromSelect();
   const rootCat = state.currentCategory;
   const content = $("tree-content");
   content.innerHTML = "";
@@ -3062,9 +3116,18 @@ async function loadTree() {
 }
 
 function updateTreeStatus(ctx) {
-  $("tree-status").textContent = ctx.truncated
-    ? `${ctx.nodes}+ categories (truncated)`
-    : `${ctx.nodes} subcategories`;
+  const status = $("tree-status");
+  if (status) {
+    status.textContent = `${ctx.nodes} ${ctx.nodes === 1 ? "subcategory" : "subcategories"}`;
+  }
+  // The budget, not the depth number, is what actually stops a walk — so show it
+  // (v1.31). "Fully" is only meaningful if you can see the ceiling it runs into.
+  const budget = $("tree-budget");
+  if (budget) {
+    budget.textContent = ctx.truncated
+      ? `· budget ${ctx.max} reached`
+      : `· budget ${ctx.nodes}/${ctx.max}`;
+  }
   let more = $("tree-load-more");
   if (ctx.truncated) {
     if (!more) {
@@ -3079,7 +3142,7 @@ function updateTreeStatus(ctx) {
         more = null;
         loadTree();
       });
-      $("tree-status").after(more);
+      ($("tree-budget") || $("tree-status")).after(more);
     }
   } else if (more) {
     more.remove();
@@ -4445,9 +4508,11 @@ async function init() {
     syncSortUI();
     syncDeepUI();
   }
-  const urlDepth = parseInt(params.get("depth"), 10);
-  if (urlDepth >= 1 && urlDepth <= 5) state.treeDepth = urlDepth;
-  $("tree-depth").value = String(state.treeDepth);
+  const urlDepthRaw = (params.get("depth") || "").trim().toLowerCase();
+  const urlDepth = parseInt(urlDepthRaw, 10);
+  if (urlDepthRaw === "max") state.treeDepth = TREE_FULL_DEPTH;
+  else if (urlDepth >= 1) state.treeDepth = Math.min(urlDepth, TREE_DEPTH_MAX); // 12 → 8, not silently 2
+  syncTreeDepthSelect();
   const urlSize = params.get("size");
   if (SIZE_COLS[urlSize]) state.size = urlSize;
   syncSizeUI();
@@ -4659,10 +4724,14 @@ async function init() {
       state.type = t2;
       $("type-select").value = t2;
     }
-    const d2 = parseInt(p2.get("depth"), 10);
-    if (d2 >= 1 && d2 <= 5) {
-      state.treeDepth = d2;
-      $("tree-depth").value = String(d2);
+    const d2raw = (p2.get("depth") || "").trim().toLowerCase();
+    const d2 = parseInt(d2raw, 10);
+    if (d2raw === "max") {
+      state.treeDepth = TREE_FULL_DEPTH;
+      syncTreeDepthSelect();
+    } else if (d2 >= 1) {
+      state.treeDepth = Math.min(d2, TREE_DEPTH_MAX);
+      syncTreeDepthSelect();
     }
     state.treeOpen = false;
     $("tree-modal").classList.add("hidden");

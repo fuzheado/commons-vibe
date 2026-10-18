@@ -9,7 +9,30 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-18, v1.30 shipped with this commit; v1.15–v1.29 deployed)
+## Current state (updated 2026-10-18, v1.31 shipped with this commit; v1.15–v1.30 deployed)
+
+- **2026-10-18 — tree depth 1–8, "Fully", and a visible node budget (v1.31).**
+  Asked whether the 5-level tree ceiling should be raised. The measurement answered it:
+  on `Category:Wiki Loves Monuments 2026`, depth 5 and an **injected depth 8** rendered
+  the *same* 200 nodes in the same 64 API calls / 13.5 s — the **node budget** binds
+  first, not the depth number, because one `categorymembers` call returns 500 titles for
+  a whole level (~210 ms each including paint, so the full 500-node budget is ~160 calls
+  ≈ 30–35 s cold).
+  So the ceiling became **8** (a UX knob) and **"Fully"** removes the depth bound
+  entirely: internally `TREE_FULL_DEPTH`, i.e. "walk until the budget stops you" —
+  termination is the visited-set cycle guard plus `ctx.max`, not a depth number. The
+  dialog now prints the budget it is spending (`· budget 142/500`, or `· budget 500
+  reached` beside "Load 500 more"), because "Fully" is only meaningful if the ceiling it
+  runs into is visible.
+  Boot clamping changed too: `depth=12` clamps to 8 instead of being silently ignored
+  (which fell back to the default 2), and `depth=max` is additive on the existing param.
+  Honesty note: selecting 6+ adds *"This depth is browsable; subtree shuffle samples ~5
+  levels."* — `deepcategory:` is capped at **5 levels / 256 categories** server-side, so
+  a shuffled feed structurally cannot mirror a deeper browse, while the walked browse
+  (`deep=1&sort=alpha`) already can.
+  Deliberately unchanged: `DEEP_WALK_DEPTH` stays 5 for the shuffle pool (mirrors the
+  server) and `clampPetDepth` stays 5 (mirrors what PetScan resolves).
+  Regression: `tests/tree-depth.spec.js` (18 assertions).
 
 - **2026-10-18 — the deep banner could print the category's DIRECT file count as the
   subtree total (v1.30).** Reported from live on
@@ -627,7 +650,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (31 assertions, v1.18 + v1.29 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip, plus the clips manager: bar, editor round-trip, rejection of unknown files, typed order, and the two-step clear-all), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (38 assertions, v1.22 + v1.25 + v1.29 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch, stale-page resilience (the feed survives a pre-v1.22 cached page, warns, reloads at most once), and "Everything in scope": instant for clips/lists, paged for a category, tree-walked for deep, titles-only envelope, and no leakage back into drawn-set exports), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (17 assertions, v1.26 + v1.28.2 + v1.30 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), "a zero prints nothing", and v1.30's rule that a **direct-count** answer is not a subtree total — stubbed, plus the live reported category; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (31 assertions, v1.18 + v1.29 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip, plus the clips manager: bar, editor round-trip, rejection of unknown files, typed order, and the two-step clear-all), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (38 assertions, v1.22 + v1.25 + v1.29 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch, stale-page resilience (the feed survives a pre-v1.22 cached page, warns, reloads at most once), and "Everything in scope": instant for clips/lists, paged for a category, tree-walked for deep, titles-only envelope, and no leakage back into drawn-set exports), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (17 assertions, v1.26 + v1.28.2 + v1.30 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), "a zero prints nothing", and v1.30's rule that a **direct-count** answer is not a subtree total — stubbed, plus the live reported category; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `tree-depth.spec.js` (18 assertions, v1.31 — depth ceiling 8, "Fully" removing the bound, the budget readout (`N/M`, `reached`, Load More raising the ceiling and keeping Fully), boot clamping of `depth=12`→8 and `depth=max`, the shuffle caveat at 6+, and chevron expansion past the selected depth), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -656,7 +679,9 @@ Live at **https://commons-vibe.toolforge.org/**.
   reset. `size=` picks tile density (S/M/L header toggle; `m` = classic 1–4 columns).
   `deep=1` implies shuffle (deep sampling uses the search API); the "Deep ✓" chip in the
   sort pill shows when it's active and toggles it off. `tree=1&depth=N` boots with the
-  tree modal open at depth N; both params drop when the modal closes.
+  tree modal open at depth N; both params drop when the modal closes. `N` is 1–8 since
+  v1.31 (an out-of-range value clamps to 8 — it is no longer silently ignored), and
+  `depth=max` means **Fully**: expand until the node budget stops the walk.
 - **localStorage keys:** `vibe_config` (category list, `Category:Name | Label` lines),
   `cv_api_cache_v1` (API response cache), `vibe_clips` (personal collection —
   JSON array of `File:` titles, newest first, v1.18) and `vibe_lite` (thumbnail
@@ -693,8 +718,12 @@ python3 -m http.server 8123        # any static server works; no build step
 8. Copy URL → open in new tab → same view.
 9. Reload a visited category → zero `api.php` network requests (cache hit).
 10. Console: no errors beyond favicon 404 + Tailwind CDN warning (both pre-existing).
-11. Tree modal (👥 button) → depth select 1–5 auto-expands that many levels;
-    clicking a category name navigates; ▸ toggles lazy one-level expansion.
+11. Tree modal (👥 button) → depth select 1–8 (plus **Fully**) auto-expands that many
+    levels; clicking a category name navigates; ▸ toggles lazy one-level expansion, which
+    is unbounded and reaches deeper than the selected number. The header prints
+    `N subcategories · budget N/500`; at the ceiling it reads `budget 500 reached` and
+    offers "Load 500 more". Selecting 6+ adds a caveat that subtree *shuffle* samples only
+    ~5 levels (the search index's own cap) while browse walks every level.
 12. Treebar above grid → "↑" parent chips and "↳" subcategory chips (file counts);
     chips navigate; "+N more" opens the tree modal.
 13. "Shuffle Entire Subtree" in tree modal → `sort=shuffle&deep=1` in URL, purple
@@ -837,6 +866,12 @@ python3 -m http.server 8123        # any static server works; no build step
     fall back to summing the subtree walk and keep the `≈`. A genuinely empty
     subtree prints nothing, because the feed itself says "End of Collection".
     Automated: `tests/deep-banner.spec.js` (17 assertions).
+35. Tree depth 1–8 + "Fully" + budget readout (v1.31): the ceiling is a UX knob; the node
+    budget is the real bound (measured: depth 5 and an injected depth 8 render the same 200
+    nodes in the same 64 calls / 13.5 s). `depth=max` is additive, `depth=12` clamps to 8
+    instead of being ignored, the modal prints `budget N/500`, and 6+ notes that shuffle
+    samples ~5 levels while browse walks every level. Automated: `tests/tree-depth.spec.js`
+    (18 assertions).
 34. Export "Everything in scope" + clips manager (v1.29): the export limit list gains
     a scope-wide enumeration ("Everything in scope" beside "Everything drawn") —
     instant for clips/list feeds, paged for a category, tree-walked for deep, with
@@ -1113,7 +1148,10 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
 - `buildTreeLevel(cat)` — `cmtype=subcat` members + counts; the one tree primitive.
 - `fetchTreebar()` — fills the ↑ parents / ↳ subcats chip rows on every reset.
 - `openTreeModal()` / `loadTree()` / `renderTreeChildren()` / `treeRowEl()` — the
-  depth-N auto-expanding modal tree; `treeCap` (500, resumable via the "Load 500
+  depth-N auto-expanding modal tree (`TREE_DEPTH_MAX` = 8; `TREE_FULL_DEPTH` = 99 backs
+  the "Fully" option; `treeDepthFromSelect`/`treeDepthOption`/`syncTreeDepthSelect`
+  translate between the select's `1..8|max` and state — writing `String(99)` into a
+  select silently blanks it); `treeCap` (500, resumable via the "Load 500
   more" button — cached categories replay instantly) bounds each render pass,
   with a visited-set deduping cyclic DAG references; `treeReqId` (bumped by
   `resetAndFetch`) kills stale renders. `?treecap=N` overrides for testing.

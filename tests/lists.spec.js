@@ -94,7 +94,15 @@ async page => {
   t("open: source menu has a Lists group with it selected", menu.groups.includes("Lists") && menu.lists.includes("PagePile 116948") && menu.selected === "PagePile 116948", JSON.stringify(menu));
   t("open: tree browser hidden in list mode", (await vis("tree-btn")) === "hidden");
   t("open: deep chip hidden in list mode", (await vis("deep-chip")) === "hidden");
-  t("open: count badge shows the list length", (await page.evaluate(() => document.getElementById("cat-count").textContent)) === "2");
+  // Wait for the badge rather than sampling it: a categoryinfo lookup from the
+  // previous feed can still be in flight (fixed with a token guard in v1.31, but
+  // the wait keeps this assertion honest under a slow live API).
+  await page.waitForFunction(
+    () => document.getElementById("cat-count").textContent === "2",
+    null,
+    { timeout: 15000 },
+  ).catch(() => {});
+  t("open: count badge shows the list length", (await page.evaluate(() => document.getElementById("cat-count").textContent)) === "2", await page.evaluate(() => document.getElementById("cat-count").textContent));
 
   // ── 3. The invariants that used to leak (§2.2) ───────────────────────────
   await page.goto(BASE + "/?pile=" + PILE + "&deep=1", { waitUntil: "domcontentloaded" });

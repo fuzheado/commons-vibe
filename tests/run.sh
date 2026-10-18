@@ -41,6 +41,7 @@ run_spec tests/export.spec.js          "export spec (v1.22 — export dialog)"  
 run_spec tests/title-wrap.spec.js      "title-wrap spec (v1.23 — case-faithful names)" || exit 1
 run_spec tests/deep-banner.spec.js     "deep-banner spec (v1.26 — subtree count)"    || exit 1
 run_spec tests/deep-serial.spec.js     "deep-serial spec (v1.27 — subtree browse)"  || exit 1
+run_spec tests/tree-depth.spec.js      "tree-depth spec (v1.31 — 1–8 + Fully, budget)" || exit 1
 run_spec tests/pile-read.spec.js       "pile-read spec (v1.27.2 — PagePile CORS)"   || exit 1
 run_spec tests/lists.spec.js           "lists spec (v1.28 — entry, guards, publish)" || exit 1
 run_spec tests/stl.spec.js             "STL spec (3D viewer)"                         || exit 1
