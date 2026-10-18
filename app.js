@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.29 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.30 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–5, lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.29"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.30"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -3254,6 +3254,31 @@ async function walkSubtreeTotal(waitMs = 3000) {
   return { sum: pool.reduce((s, n) => s + (n.files || 0), 0), nodes: pool.length };
 }
 
+// Is deepcategory's total untrustworthy as a SUBTREE total? Two known shapes,
+// both observed live: it answers 0 for a container category that holds no files
+// directly (2026-10-03), and it answers exactly the category's own direct file
+// count when the server-side category graph has not expanded the tree yet —
+// 2026-10-18, on a tree whose 36 categories had all been created hours earlier:
+// deepcategory said 7 (= the root's direct files) while the subtree held 923
+// unique files. A category that HAS subcategories cannot hold more files than
+// its own direct count, so `total <= direct` there means "no expansion
+// happened". Needs the root's categoryinfo (7-day cache, one cheap call); if
+// that lookup fails we keep the search's number rather than suppress it.
+async function deepCountImplausible(total) {
+  if (total !== 0) {
+    try {
+      const info = await getCatInfo([state.currentCategory]);
+      const root = info.get(normCat(state.currentCategory));
+      if (!root) return false;
+      if (root.subcats > 0 && total <= root.files) return true;
+      return false;
+    } catch {
+      return false;
+    }
+  }
+  return true; // a zero is never a trustworthy subtree total (v1.28.2)
+}
+
 async function refreshDeepCount() {
   if (!state.deepMode) return;
   const key = `${state.currentCategory}|${state.type}`;
@@ -3273,17 +3298,20 @@ async function refreshDeepCount() {
     }, { ttl: 3600e3, detach: true });
     let total = data.query && data.query.searchinfo && data.query.searchinfo.totalhits;
     if (typeof total !== "number") return;
-    if (total === 0 && state.type === "all") {
-      // CirrusSearch's deepcategory answers 0 for container categories that hold
-      // no files directly (reported 2026-10-03: Category:WikiPortraits in New
-      // York City in 2026 — hidden, 0 direct files, 5 subcategories; deepcategory
-      // 0, the non-hidden parent 69,414, while the subtree really holds files).
+    if (state.type === "all" && await deepCountImplausible(total)) {
+      // CirrusSearch's deepcategory does not always answer for the subtree — a
+      // zero for container categories (v1.28.2) or, reported 2026-10-18,
+      // EXACTLY the category's own direct file count when the tree is newer
+      // than the server-side category graph: Category:2026 high school student
+      // movement and blockades in France answered 7 (its direct files) while
+      // the subtree held 923 unique files in 36 categories, all created hours
+      // earlier. Both are the same lie, so both take the walk.
       // The walk knows better and is already cached for deep mode.
       const walk = await walkSubtreeTotal();
       if (walk.pending) {
-        // Unknown yet, and "no files" would be a lie: leave it blank and let the
-        // walk re-render once it lands (deepCountKey reset so the re-run is not
-        // swallowed by the same-key guard).
+        // Unknown yet, and "no files"/a direct count would be a lie: leave it
+        // blank and let the walk re-render once it lands (deepCountKey reset so
+        // the re-run is not swallowed by the same-key guard).
         deepCountKey = null;
         walk.pending.then(() => { if (state.deepMode) refreshDeepCount(); });
         return;
