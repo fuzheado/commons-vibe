@@ -88,6 +88,49 @@ async page => {
   t("container: never claims 'no files' when the subtree has files", !/no files/.test(container), JSON.stringify(container));
   t("container: the feed still renders", (await page.evaluate(() => document.querySelectorAll(".group").length)) >= 12);
 
+  // ── 6. A direct-count answer is not a subtree count (v1.30) ──────────────
+  // Reported 2026-10-18 on Category:2026 high school student movement and
+  // blockades in France: deepcategory answered EXACTLY the category's own
+  // direct file count (7) because the server-side category graph had not
+  // expanded a tree created hours earlier — the feed walked all 923 files
+  // while the banner said "≈7". Same lie as the zero case, so it must take the
+  // walk too. Stubbed here so the assertion doesn't depend on the index being
+  // broken again: Category:Quality images of China really holds 180 direct
+  // files and ~1,388 unique in its subtree.
+  await page.evaluate(() => localStorage.clear());
+  await page.route("**/api.php*", async (route) => {
+    const u = route.request().url();
+    if (u.includes("list=search") && u.includes("deepcategory")) {
+      return route.fulfill({
+        status: 200,
+        headers: { "content-type": "application/json", "access-control-allow-origin": "*" },
+        body: JSON.stringify({ batchcomplete: true, query: { searchinfo: { totalhits: 180 }, search: [] } }),
+      });
+    }
+    return route.continue();
+  });
+  await page.goto(BASE + "/?sort=alpha&view=det&cat=Category%3AQuality+images+of+China&deep=1&size=m&type=all", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".group", { timeout: 60000 }).catch(() => {});
+  await settled();
+  const collapsed = await countText();
+  const collapsedN = parseInt((((collapsed.match(/≈([\d,]+)/) || [])[1]) || "0").replace(/,/g, ""), 10);
+  t("collapsed: a direct-count answer is not printed as the subtree total", collapsedN !== 180, JSON.stringify(collapsed));
+  t("collapsed: banner falls back to the walk's subtree count", collapsedN > 300, JSON.stringify(collapsed));
+  t("collapsed: the feed still renders", (await page.evaluate(() => document.querySelectorAll(".group").length)) >= 12);
+  await page.unroute("**/api.php*");
+  await page.evaluate(() => localStorage.clear());
+
+  // Live reproduction of the reported URL: 7 direct files, 923 unique in the
+  // subtree (verified by full enumeration 2026-10-18). Assert only that the
+  // banner is comfortably larger than the direct count, never the exact value.
+  await page.goto(BASE + "/?sort=alpha&view=det&cat=Category%3A2026+high+school+student+movement+and+blockades+in+France&deep=1&size=m&type=all", { waitUntil: "domcontentloaded" });
+  await page.waitForSelector(".group", { timeout: 60000 }).catch(() => {});
+  await settled();
+  const reported = await countText();
+  const reportedN = parseInt((((reported.match(/≈([\d,]+)/) || [])[1]) || "0").replace(/,/g, ""), 10);
+  t("reported category: banner is not the 7-file direct count", reportedN !== 7 && reportedN > 500, JSON.stringify(reported));
+  await page.evaluate(() => localStorage.clear());
+
   if (failed) throw `${failed} failed\n${results.join("\n")}`;
   console.log(results.join("\n"));
   return `deep-banner spec: all ${results.length} assertions pass`;

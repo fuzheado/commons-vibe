@@ -1,6 +1,6 @@
 # CommonsVibe — Project Handoff
 
-_Last updated: 2026-09-11. Read this first if you're continuing work on this project._
+_Last updated: 2026-10-18. Read this first if you're continuing work on this project._
 
 ## What this is
 
@@ -9,7 +9,40 @@ A stateless, URL-driven visual discovery tool for Wikimedia Commons categories �
 ordering, per-tile category drawer for jumping around the category graph).
 Live at **https://commons-vibe.toolforge.org/**.
 
-## Current state (updated 2026-10-16, v1.29 shipped with this commit; v1.15–v1.28.3 deployed)
+## Current state (updated 2026-10-18, v1.30 shipped with this commit; v1.15–v1.29 deployed)
+
+- **2026-10-18 — the deep banner could print the category's DIRECT file count as the
+  subtree total (v1.30).** Reported from live on
+  `?cat=Category:2026 high school student movement and blockades in France&deep=1&sort=alpha`:
+  the banner read `· ≈7 files`, which is exactly the root's own file count — the
+  subtree holds **923 unique files across 36 categories** (full enumeration,
+  2026-10-18; 988 memberships). **The feed was never wrong**: the deep-browse walker
+  rendered all 923 (verified by scrolling it to exhaustion locally, 923/923 unique
+  tiles), so this was a banner-truthfulness bug, not a data-loss bug.
+  Root cause is server-side, not app-side: CirrusSearch's `deepcategory:` answered
+  **7** — identical to `incategory:` — i.e. it never expanded the tree. Every
+  category in that tree created within ~a day answered the same way (containers
+  `Mouvement des lycéens (France)` and `… by city` → 0; `Manifestations,
+  Aix-en-Provence, 17 Oct 2026`, `Mouvement des lycéens, 17 Oct 2026` → 0), while
+  mature trees were fine in the same minute (`Quality images of China` → 1,388,
+  `Featured pictures of birds` → 1,814, `STL files` → 10,277). Stable over 18
+  probes at `srlimit` 1/5/50, so not the T246568 flakiness — the server-side
+  category graph simply lags newly created trees.
+  So v1.28.2's rule ("distrust a zero") was too narrow: a **direct-count answer is
+  the same lie with a bigger number**. `deepCountImplausible(total)` now also
+  distrusts any answer `<= the root's own direct file count` when that category
+  **has subcategories** (a category with children cannot possibly total fewer
+  files than it holds directly); both shapes take the existing subtree walk and
+  keep its `≈`, and the walk-settles-later path (blank → re-render) is unchanged.
+  The root's `categoryinfo` costs one extra cheap call (7-day cache) and only on
+  the `type=all` path; if that lookup fails the search's number is kept rather
+  than suppressed. Typed counts (`type=image` etc.) are unchanged — the walk has
+  no per-type counts, so there is nothing better to fall back to.
+  Known residual: the walk sums **memberships** (988) not unique files (923) —
+  the same documented trade-off v1.28.2 accepted, ~7% high here, hence the `≈`.
+  Regression: `tests/deep-banner.spec.js` (17 assertions — adds a stubbed
+  direct-count answer that must NOT be printed, and the reported URL live, which
+  must come back `> 500` rather than `7`).
 
 - **2026-10-16 — export "Everything in scope", and a clips manager (v1.29).**
   Two things: the export dialog could only ever give you the tiles that had been
@@ -594,7 +627,7 @@ Live at **https://commons-vibe.toolforge.org/**.
 | `cache/`, `.playwright-cli/` | Local test artifacts, gitignored. |
 | `benchmark/deep-shuffle.js` | Sampler benchmark: enumerates a subtree as ground truth, measures envelope coverage + per-file uniformity, chi-square on the weighted pick, optional live `srsort=random` validation (`--live`). |
 | `vendor/` | Vendored libraries, same-origin because Toolforge CSP blocks CDN imports and the privacy rule is "no third-party JS": three.js r170 (MIT) — `three.module.min.js` + `OrbitControls.js` + LICENSE — and Tailwind Play CDN build pinned at 3.4.16 (`tailwindcdn-3.4.16.js`, MIT, v1.19). |
-| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (31 assertions, v1.18 + v1.29 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip, plus the clips manager: bar, editor round-trip, rejection of unknown files, typed order, and the two-step clear-all), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (38 assertions, v1.22 + v1.25 + v1.29 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch, stale-page resilience (the feed survives a pre-v1.22 cached page, warns, reloads at most once), and "Everything in scope": instant for clips/lists, paged for a category, tree-walked for deep, titles-only envelope, and no leakage back into drawn-set exports), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (13 assertions, v1.26 + v1.28.2 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), and "a zero prints nothing"; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
+| `tests/` | TDD suite: `version-consistency.sh` (4-site version guard — static, no browser/server, runs first in `run.sh`), `viewer.spec.js` (43 assertions, issue #23 + #35 — in-app viewer: no-new-tab, modifier-click passthrough, details, URL state, prev/next, cache, Back/deep link, and the category-pill jump from inside the viewer that used to be reverted by the viewer's own `history.back()`), `category-search.spec.js` (28 assertions — type-ahead combobox: minlength/debounce request discipline, counts, container flags, case twins, canonical insertion, keyboard + ARIA, cache), `thumb-recovery.spec.js` (22 assertions, v1.16 + v1.24 — srcset filtering + in-place recovery + dead-state button + bare `?cat=` + the Fix-images one-line/nowrap geometry guard; injects failures by aborting tile requests), `clips.spec.js` (31 assertions, v1.18 + v1.29 — clip toggle + persistence + clips feed + `?clips=1` boot + in-feed unclip, plus the clips manager: bar, editor round-trip, rejection of unknown files, typed order, and the two-step clear-all), `lite.spec.js` (22 assertions, v1.20 + v1.21 — full/lite buckets, no-retina srcset, chip + URL + stored-pref precedence, viewer stays high-res + shuffle visual-order preservation; pins a 1280×720 viewport so the slot math is deterministic), `export.spec.js` (38 assertions, v1.22 + v1.25 + v1.29 — export dialog: open/close, scope counts + disabled states, per-format previews, limit slicing, download naming, clips-scope fetch, stale-page resilience (the feed survives a pre-v1.22 cached page, warns, reloads at most once), and "Everything in scope": instant for clips/lists, paged for a category, tree-walked for deep, titles-only envelope, and no leakage back into drawn-set exports), `title-wrap.spec.js` (10 assertions, v1.23 — case-faithful wrapped titles: computed-style contract + 138-char real title wraps without overflow; Louvre category, 3 batches), `deep-banner.spec.js` (17 assertions, v1.26 + v1.28.2 + v1.30 — deep subtree count: API-sourced totalhits in the banner, per-type qualification, the container-category walk fallback (deepcategory answers 0 for hidden containers), "a zero prints nothing", and v1.30's rule that a **direct-count** answer is not a subtree total — stubbed, plus the live reported category; issue #31a), `pile-read.spec.js` (6 assertions, v1.27.2 — PagePile list feed: header-free fetch renders the pile's files, no failure alert; fixture pile 116948), `lists.spec.js` (23 assertions, v1.28 — list references: Jump-box entry + numeric hint, pasted URLs, opening via Enter, Lists group + config persistence, the deep/path/tree/alert guards, editor validation of pile lines, and Create PagePile → open as feed; leaves one small pile per run by design), `deep-serial.spec.js` (21 assertions, v1.27 + v1.27.1 — ordered subtree walk: tree-modal Browse button, deep+alpha boot, post-order subcategories-before-root-files, cross-category dedupe, sort-toggle walking↔sampling, plus the Google-Arts whole-page guard against `titles=` overflow; issue #31b), `stl.spec.js` (24 behavioral assertions), `header-collapse.spec.js` (25 assertions, issue #17 — scroll-aware collapsing header, runs in its own touch-emulated context), `wrongcase-cat.spec.js` (8 assertions, v1.14.1 — CirrusSearch case-doppelgänger leak), `stl-tour.js` (showcase tour), `engine-quirks.spec.js` (6 assertions — cross-engine facts + portability guards; see § Cross-engine notes), `spec-lib.sh` (the shared pass/fail rule — `playwright-cli run-code` always exits 0, so the gate reads stdout for `### Error`), `run.sh` (guard + all specs → green → records `tests/artifacts/stl-3d-tour.webm`, the final passing artifact), `engine-matrix.sh` (the same specs on Chromium + Firefox + WebKit). Playwright-cli needs ffmpeg — symlink `/opt/homebrew/bin/ffmpeg` to `~/Library/Caches/ms-playwright/ffmpeg-1011/ffmpeg-mac` if missing. Each spec pins its own viewport (`stl`: 1280×720 desktop; `header-collapse`: 390×844 touch) — the shared playwright session otherwise leaks sizes between runs. |
 
 ## URL contract & persistence (do not break)
 
@@ -792,12 +825,18 @@ python3 -m http.server 8123        # any static server works; no build step
     **Export** moved to the top row, immediately left of the ℹ About button.
     Automated: `tests/thumb-recovery.spec.js` (2 new assertions — one-line
     and `white-space: nowrap` at a squeezed 1024px viewport).
-31. Deep subtree count (v1.26, issue #31(a)): with deep mode on, the banner
-    shows `· ≈N files` (per media type: `· ≈N images`, `· no videos`) from one
-    `deepcategory` search call's `searchinfo.totalhits` — deduplicated, cached
-    1h, hidden on failure. `api()` gains a `detach: true` option so this
-    request survives feed aborts. Automated: `tests/deep-banner.spec.js`
-    (10 assertions).
+31. Deep subtree count (v1.26, issue #31(a); hardened v1.28.2 + v1.30): with
+    deep mode on, the banner shows `· ≈N files` (per media type: `· ≈N images`,
+    `· no videos`) from one `deepcategory` search call's
+    `searchinfo.totalhits` — deduplicated, cached 1h, hidden on failure.
+    `api()` gains a `detach: true` option so this request survives feed
+    aborts. **The search's number is not trusted blindly (v1.28.2 + v1.30):**
+    a zero is never printed, and neither is an answer `<= the category's own
+    direct file count` when it has subcategories (that is deepcategory failing
+    to expand, e.g. a tree newer than the server-side category graph) — both
+    fall back to summing the subtree walk and keep the `≈`. A genuinely empty
+    subtree prints nothing, because the feed itself says "End of Collection".
+    Automated: `tests/deep-banner.spec.js` (17 assertions).
 34. Export "Everything in scope" + clips manager (v1.29): the export limit list gains
     a scope-wide enumeration ("Everything in scope" beside "Everything drawn") —
     instant for clips/list feeds, paged for a category, tree-walked for deep, with
@@ -1022,6 +1061,11 @@ All in `api(params, {ttl})` in `app.js` — always route queries through it.
   Shuffle draws via `flatSampleTitles()` (single category) or `deepSampleTitles()`
   (deep mode) — both `srsort=random&srlimit=50` → `pickNewTitles()` dedupe → 12.
 - `collectSubtree()` / `deepSampleTitles()` — deep-mode sampler (see below).
+- `refreshDeepCount()` / `deepCountImplausible()` / `walkSubtreeTotal()` — the deep
+  banner's `· ≈N files` (v1.26): one `deepcategory` search, `detach`ed and cached
+  1h; a zero (v1.28.2) or an answer ≤ the root's own direct file count when it has
+  subcategories (v1.30) is not a subtree total, so the banner falls back to the
+  subtree walk's summed counts and re-renders when the walk settles.
 - `getBatch()` / `prefetchNext()` — one-batch lookahead queue.
 - `fetchImages()` — orchestration + sentinel fill-up loop (`lastBatchOk`).
 - `buildCard()` — tile DOM; `pickBestVideo()`, `srcsetFor()`, drawer/pill wiring.
@@ -1298,6 +1342,20 @@ fine for a snapshot feature, wrong for a live shuffle.
 
 ## Known issues / open items
 
+0a. **`deepcategory:` can answer the DIRECT file count instead of the subtree
+   (server-side, 2026-10-18).** On a tree whose categories were created hours
+   earlier, `deepcategory:"X"` returned exactly `incategory:"X"` for every node
+   — 7 for a root whose subtree held 923 unique files — i.e. no expansion
+   happened at all. Stable across 18 probes and every `srlimit`, while mature
+   trees answered correctly in the same minute (`Quality images of China`
+   1,388, `Featured pictures of birds` 1,814, `STL files` 10,277), so this is a
+   lag in the server-side category graph for new trees, not T246568 flakiness.
+   The app now distrusts it (v1.30, `deepCountImplausible`), but if a deep
+   count looks low the first check is still: compare `deepcategory:` against
+   `incategory:` and against the root's `categoryinfo.files`. The same answer
+   also starves **deep shuffle**'s pre-walk fallback draws, which are plain
+   `deepcategory` queries — the feed then shows only the root's direct files
+   until the client walk lands (~1–4 min cold on a big tree).
 0. **CirrusSearch keyword instability (transient, server-side):** during
    testing, `incategory:`/`deepcategory:` intermittently returned zero results
    (T246568 degradation). Client code is correct; if shuffle suddenly returns
