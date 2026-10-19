@@ -196,7 +196,7 @@
                 <p class="text-[12px] text-zinc-400">All media is pulled live from Commons and remains under its free license — image credits and file pages are one click away on every tile. Nothing is tracked, and nothing leaves your browser except API requests to Wikimedia.</p>
                 <div class="flex flex-wrap gap-x-4 gap-y-1 text-[10px] uppercase tracking-widest font-bold text-zinc-500 border-t border-zinc-800 pt-3">
                     <a href="https://github.com/fuzheado/commons-vibe" target="_blank" class="text-blue-500 hover:text-blue-400">Source on GitHub ↗</a>
-                    <span id="app-version">v1.31</span>
+                    <span id="app-version">v1.32</span>
                     <span>Built by <a href="https://en.wikipedia.org/wiki/User:Fuzheado" target="_blank" class="text-blue-500 hover:text-blue-400">Andrew Lih</a></span>
                     <span>Hosted on Toolforge</span>
                 </div>
@@ -225,6 +225,11 @@
                 <div class="flex items-center gap-2 bg-zinc-900 border border-zinc-800 rounded-lg pr-3">
                     <select id="vibe-select" class="bg-transparent text-[10px] font-bold tracking-widest text-zinc-300 px-3 py-2 outline-none focus:text-blue-500 max-w-[320px]"></select>
                     <span id="cat-count" class="text-[9px] font-mono text-blue-500 font-black border-l border-zinc-700 pl-3">0</span>
+                    <!-- v1.32: the category you are browsing, on Commons. There was no
+                         way out to the category page before this — only to files.
+                         Visibility is the .show class (style.css), not Tailwind's
+                         hidden/flex ordering. -->
+                    <a id="cat-commons" class="cat-commons" href="#" target="_blank" rel="noopener" title="Open this category on Commons" aria-label="Open this category on Commons">↗</a>
                 </div>
 
                 <div class="flex gap-2">

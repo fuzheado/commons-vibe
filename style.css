@@ -408,6 +408,27 @@ html {
 .thumb-fix-btn { display: none; }
 .thumb-fix-btn.show { display: flex; }
 
+/* Link out to the current category's Commons page (v1.32) — sits right after the
+ * category name and file count in the header, so "where am I" and "show me the
+ * real thing" are one glance. `.show` is toggled by syncCatCommons() in app.js
+ * (same pattern as .stl-loading/.thumb-fix-btn above: never depend on Tailwind's
+ * hidden/flex ordering). */
+.cat-commons {
+  display: none;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 0.35rem 0 0.75rem;
+  border-left: 1px solid #3f3f46;
+  color: #71717a;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+  text-decoration: none;
+  transition: color 0.15s;
+}
+.cat-commons.show { display: inline-flex; }
+.cat-commons:hover { color: #ffffff; }
+
 /* A tile whose image could not be recovered after the retry ladder. Amber
  * outline + a non-interactive "retry" chip; the click itself is handled in
  * app.js (capture phase), where clicking a dead tile retries instead of

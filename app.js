@@ -1,4 +1,4 @@
-/* CommonsVibe — vanilla JS engine (v1.31 — bump the VERSION const below, not this line)
+/* CommonsVibe — vanilla JS engine (v1.32 — bump the VERSION const below, not this line)
  * Category tree (v1.6): tree modal (depth 1–8 or "Fully", lazy expand), inline treebar
  * (parent + subcategory chips with file counts), deep mode (shuffle the whole
  * subtree via CirrusSearch deepcategory, URL param deep=1).
@@ -44,7 +44,7 @@ const CLIPS_KEY = "vibe_clips"; // personal collection: JSON array of File: titl
 const LITE_KEY = "vibe_lite";   // lite mode preference: "1" on, "0" explicitly off, absent = full quality
 const MAX_DISK_CACHE = 2_000_000; // bytes, rough
 const MEM_CACHE_MAX = 300; // entries
-const VERSION = "1.31"; // single source of truth — footer badge is synced from this at boot
+const VERSION = "1.32"; // single source of truth — footer badge is synced from this at boot
 const UA_NOTE = `CommonsVibeExplorer/${VERSION} (https://commons-vibe.toolforge.org/; contact: User:Fuzheado)`;
 
 const state = {
@@ -465,6 +465,32 @@ async function buildTreeLevel(catTitle) {
 }
 
 const catDisplayName = (t) => t.replace("Category:", "").replaceAll("_", " ");
+
+// Where the category you are browsing lives on Commons (v1.32). Before this the
+// app only ever linked out to FILE pages — there was no route from "I'm browsing
+// this category" to the category page itself. One helper so the header link and
+// the breadcrumb trail can never point at different pages.
+// Spaces become underscores: Commons serves that form with a 200 directly, while
+// the %20 form answers 301 → canonical (measured 2026-10-18). File links already
+// carry underscores because the API returns titles that way.
+const catCommonsUrl = (cat) => `https://commons.wikimedia.org/wiki/${quotePath(cat.replace(/ /g, "_"))}`;
+
+// Keep the header's ↗ link (beside the category name + file count) in step with
+// the current category. Hidden in list/clips mode, which has no category.
+function syncCatCommons() {
+  const a = $("cat-commons");
+  if (!a) return;
+  const cat = state.list ? "" : state.currentCategory;
+  if (!cat) {
+    a.classList.remove("show");
+    a.removeAttribute("href");
+    return;
+  }
+  a.href = catCommonsUrl(cat);
+  a.title = `Open ${catDisplayName(cat)} on Commons`;
+  a.setAttribute("aria-label", `Open ${catDisplayName(cat)} on Commons`);
+  a.classList.add("show");
+}
 
 // A category arriving from a URL may lack its namespace (`?cat=Images from X`),
 // which makes the Action API answer `invalidcategory` and leaves an empty feed.
@@ -2919,6 +2945,15 @@ function renderCrumbs() {
       cur.textContent = catDisplayName(cat);
       cur.title = cat;
       el.appendChild(cur);
+      // The end of the trail is a real place on Commons — say so, in-place (v1.32).
+      const ext = document.createElement("a");
+      ext.className = "text-[10px] font-black text-zinc-500 hover:text-white uppercase tracking-widest transition-colors";
+      ext.href = catCommonsUrl(cat);
+      ext.target = "_blank";
+      ext.rel = "noopener";
+      ext.textContent = "↗ Commons";
+      ext.title = `Open ${catDisplayName(cat)} on Commons`;
+      el.appendChild(ext);
     } else {
       const b = document.createElement("button");
       b.className = "cat-pill px-2 py-1 rounded-full text-[9px] font-bold bg-zinc-800 text-zinc-300 hover:bg-blue-600 hover:text-white transition-colors max-w-[220px] truncate";
@@ -3576,6 +3611,7 @@ function resetAndFetch() {
   syncDeepUI(); // banner text tracks the new category when deep stays on
   syncListUI(); // the tree browser is category-only (v1.28)
   syncClipsBar(); // clips manager bar is clips-feed only (v1.29)
+  syncCatCommons(); // header's ↗ link to this category's Commons page (v1.32)
   updateURL();
   fetchCategoryInfo();
   fetchTreebar();
